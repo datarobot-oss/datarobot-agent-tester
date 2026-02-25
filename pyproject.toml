@@ -24,6 +24,7 @@ dr-agent = "dr_agents_tester.cli:main"
 dev = [
     "mypy>=1.15.0",
     "pytest>=8.0",
+    "pytest-cov>=6.0",
     "pytest-mock>=3.14",
     "ruff>=0.11.0",
 ]
