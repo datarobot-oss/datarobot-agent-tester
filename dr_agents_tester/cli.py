@@ -33,14 +33,14 @@ def _load_env() -> None:
 
 
 def _make_config(args: argparse.Namespace) -> Config:
-    from .config import Config
-
-    return Config(
-        api_key=os.environ.get("DATAROBOT_API_TOKEN", ""),
-        endpoint=os.environ.get("DATAROBOT_ENDPOINT", "https://app.datarobot.com/api/v2"),
-        model=getattr(args, "model", None) or os.environ.get("AGENTS_MD_MODEL", ""),
-        test_model=getattr(args, "test_model", None) or os.environ.get("AGENTS_MD_TEST_MODEL", ""),
-    )
+    # Config() reads all env vars and applies defaults; only override if
+    # the caller explicitly passed --model / --test-model flags.
+    cfg = Config()
+    if getattr(args, "model", None):
+        cfg.model = args.model
+    if getattr(args, "test_model", None):
+        cfg.test_model = args.test_model
+    return cfg
 
 
 # ---------------------------------------------------------------------------

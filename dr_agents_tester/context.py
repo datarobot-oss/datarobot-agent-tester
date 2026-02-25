@@ -13,6 +13,7 @@ class Context(TypedDict):
     copier_answers: dict[str, str]
     sibling_agents_md: dict[str, str]
 
+
 PRIORITY_FILES = [
     "README.md",
     "AGENTS.md",
