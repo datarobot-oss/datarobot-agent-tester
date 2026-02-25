@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# uv / virtualenv
+.venv/
+
+# Testing / coverage
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.xml
+coverage.xml
+
+# Type checking
+.mypy_cache/
+
+# Linting
+.ruff_cache/
+
+# Generated artifacts (do not commit)
+.env
+*.skill-report.md
+*.skill-revision-notes.md
+.agents-md-report.md
+.agents-md-revision-notes.md
+
+# OS
+.DS_Store
+Thumbs.db

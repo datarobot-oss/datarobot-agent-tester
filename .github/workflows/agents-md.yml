@@ -1,0 +1,88 @@
+---
+name: AGENTS.md
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  agents-md:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Taskfile
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        run: task install
+
+      # On PRs: dry-run generate to catch issues, then evaluate the existing AGENTS.md
+      - name: Generate AGENTS.md (dry run)
+        if: github.event_name == 'pull_request'
+        run: task agents-generate -- --dry-run --no-copilot
+        env:
+          DATAROBOT_API_TOKEN: ${{ secrets.DATAROBOT_API_TOKEN }}
+
+      - name: Test AGENTS.md
+        if: github.event_name == 'pull_request'
+        run: task agents-test
+        env:
+          DATAROBOT_API_TOKEN: ${{ secrets.DATAROBOT_API_TOKEN }}
+
+      # On push to main: write the updated AGENTS.md and commit it back
+      - name: Generate AGENTS.md
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: task agents-generate
+        env:
+          DATAROBOT_API_TOKEN: ${{ secrets.DATAROBOT_API_TOKEN }}
+
+      - name: Commit updated AGENTS.md
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add AGENTS.md .github/copilot-instructions.md || true
+          git diff --cached --quiet || git commit -m "chore: update AGENTS.md [skip ci]"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  skills:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Taskfile
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        run: task install
+
+      - name: Test all skills
+        run: task skills-test
+        env:
+          DATAROBOT_API_TOKEN: ${{ secrets.DATAROBOT_API_TOKEN }}

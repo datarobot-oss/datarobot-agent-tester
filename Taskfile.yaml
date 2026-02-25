@@ -1,0 +1,71 @@
+---
+# https://taskfile.dev
+version: "3"
+
+vars:
+  SRCDIR: ./dr_agents_tester/
+  # Cross-platform: strips PYTHONPATH/VIRTUAL_ENV so uv uses its own venv cleanly
+  UV_CMD:
+    sh: |
+      if command -v env >/dev/null 2>&1; then
+        echo "env -u PYTHONPATH -u VIRTUAL_ENV uv"
+      else
+        echo "uv"
+      fi
+
+tasks:
+  install:
+    desc: "🔧 Install dependencies"
+    cmds:
+      - echo "🔧 Installing dependencies..."
+      - "{{.UV_CMD}} sync --all-groups"
+
+  lint:
+    silent: true
+    desc: "🧹 Run linters (format + check + mypy)"
+    cmds:
+      - echo "🧹 Running linters..."
+      - "{{.UV_CMD}} run ruff format {{.SRCDIR}}"
+      - "{{.UV_CMD}} run ruff check {{.SRCDIR}} --fix"
+      - "{{.UV_CMD}} run mypy --pretty {{.SRCDIR}}"
+
+  lint-check:
+    silent: true
+    desc: "🧹 Check linting without modifying files (used in CI)"
+    cmds:
+      - echo "🧹 Checking lint..."
+      - "{{.UV_CMD}} run ruff format --check {{.SRCDIR}}"
+      - "{{.UV_CMD}} run ruff check {{.SRCDIR}}"
+      - "{{.UV_CMD}} run mypy --pretty {{.SRCDIR}}"
+
+  test:
+    silent: true
+    desc: "🧪 Run tests"
+    cmds:
+      - echo "🧪 Running tests..."
+      - "{{.UV_CMD}} run pytest --cov=dr_agents_tester --cov-report=term --cov-report=html --cov-report=xml:.coverage.xml"
+
+  agents-generate:
+    desc: "🤖 Generate/update AGENTS.md for this repo"
+    cmds:
+      - "{{.UV_CMD}} run dr-agent agents generate {{.CLI_ARGS}}"
+
+  agents-test:
+    desc: "🧪 Evaluate the AGENTS.md in this repo"
+    cmds:
+      - "{{.UV_CMD}} run dr-agent agents test {{.CLI_ARGS}}"
+
+  agents-revise:
+    desc: "✏️  Revise AGENTS.md based on last test report"
+    cmds:
+      - "{{.UV_CMD}} run dr-agent agents revise {{.CLI_ARGS}}"
+
+  skills-test:
+    desc: "🧪 Evaluate all skills in the skills/ directory"
+    cmds:
+      - "{{.UV_CMD}} run dr-agent skills test --all {{.CLI_ARGS}}"
+
+  skills-improve:
+    desc: "✏️  Improve a skill based on its last test report"
+    cmds:
+      - "{{.UV_CMD}} run dr-agent skills improve {{.CLI_ARGS}}"

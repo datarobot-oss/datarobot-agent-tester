@@ -1,0 +1,54 @@
+[build-system]
+requires = ["uv_build>=0.4,<1"]
+build-backend = "uv_build"
+
+[project]
+name = "datarobot-agent-tester"
+version = "0.1.0"
+description = "Generate, test, and improve AGENTS.md files and AI coding skills via the DataRobot LLM Gateway"
+readme = "README.md"
+authors = [{ name = "DataRobot", email = "oss-community-management@datarobot.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "litellm>=1.0",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+dr-agent = "dr_agents_tester.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "pytest>=8.0",
+    "pytest-mock>=3.14",
+    "ruff>=0.11.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [".venv", "__pycache__", ".git", "dist", "build"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+fixable = ["ALL"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = true
+disallow_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
