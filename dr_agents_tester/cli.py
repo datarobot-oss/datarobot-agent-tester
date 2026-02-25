@@ -11,7 +11,6 @@ dr-agent skills improve    Improve a skill from its saved report
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
