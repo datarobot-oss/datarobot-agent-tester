@@ -11,17 +11,13 @@ dr-agent skills improve    Improve a skill from its saved report
 """
 
 import argparse
+import importlib.util
 import sys
 from pathlib import Path
 
 from .config import Config
 
-try:
-    from dotenv import load_dotenv
-
-    _has_dotenv = True
-except ImportError:
-    _has_dotenv = False
+_has_dotenv = importlib.util.find_spec("dotenv") is not None
 
 
 def _load_env() -> None:
