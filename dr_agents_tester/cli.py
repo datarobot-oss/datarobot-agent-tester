@@ -11,31 +11,31 @@ dr-agent skills improve    Improve a skill from its saved report
 """
 
 import argparse
-import os
+import importlib.util
 import sys
 from pathlib import Path
 
-try:
-    from dotenv import load_dotenv  # type: ignore[import]
-except ImportError:
-    load_dotenv = None  # type: ignore[assignment]
+from .config import Config
+
+_has_dotenv = importlib.util.find_spec("dotenv") is not None
 
 
 def _load_env() -> None:
-    if load_dotenv:
+    if _has_dotenv:
+        from dotenv import load_dotenv
+
         load_dotenv(dotenv_path=Path(".env"), override=False)
 
 
-def _make_config(args: argparse.Namespace) -> "Config":  # noqa: F821
-    from .config import Config
-
-    return Config(
-        api_key=os.environ.get("DATAROBOT_API_TOKEN", ""),
-        endpoint=os.environ.get("DATAROBOT_ENDPOINT", "https://app.datarobot.com/api/v2"),
-        model=getattr(args, "model", None) or os.environ.get("AGENTS_MD_MODEL", ""),
-        test_model=getattr(args, "test_model", None)
-        or os.environ.get("AGENTS_MD_TEST_MODEL", ""),
-    )
+def _make_config(args: argparse.Namespace) -> Config:
+    # Config() reads all env vars and applies defaults; only override if
+    # the caller explicitly passed --model / --test-model flags.
+    cfg = Config()
+    if getattr(args, "model", None):
+        cfg.model = args.model
+    if getattr(args, "test_model", None):
+        cfg.test_model = args.test_model
+    return cfg
 
 
 # ---------------------------------------------------------------------------
@@ -194,9 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sk_test_p = skills_sub.add_parser("test", help="Evaluate a skill file")
     sk_test_p.add_argument("--skill", default=None, help="Path to skill file")
-    sk_test_p.add_argument(
-        "--all", action="store_true", help="Test all skills in --dir"
-    )
+    sk_test_p.add_argument("--all", action="store_true", help="Test all skills in --dir")
     sk_test_p.add_argument(
         "--dir", default="skills", help="Skills directory for --all. Default: skills/"
     )

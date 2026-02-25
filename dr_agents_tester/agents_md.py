@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from .config import Config
-from .context import gather_context
+from .context import Context, gather_context
 from .llm import call_llm
 
 MARKER_START = "<!-- AGENTS:GENERATED:START -->"
@@ -23,7 +23,7 @@ _COPILOT_PATH = Path(".github") / "copilot-instructions.md"
 # ---------------------------------------------------------------------------
 
 
-def _build_generate_prompt(ctx: dict[str, object]) -> str:
+def _build_generate_prompt(ctx: Context) -> str:
     parts = []
 
     if ctx["is_root"]:
@@ -63,7 +63,7 @@ def _build_generate_prompt(ctx: dict[str, object]) -> str:
 
     parts.append(f"\n## Directory structure\n```\n{ctx['tree']}\n```")
 
-    for fname, content in ctx["file_contents"].items():  # type: ignore[union-attr]
+    for fname, content in ctx["file_contents"].items():
         if fname == "AGENTS.md":
             parts.append(
                 f"\n## Existing AGENTS.md (for reference / update)\n```markdown\n{content}\n```"
@@ -73,18 +73,18 @@ def _build_generate_prompt(ctx: dict[str, object]) -> str:
 
     if ctx["copier_answers"]:
         parts.append("\n## Component origins (.datarobot/answers/)")
-        for name, content in ctx["copier_answers"].items():  # type: ignore[union-attr]
+        for name, content in ctx["copier_answers"].items():
             parts.append(f"### {name}\n```yaml\n{content}\n```")
 
     if ctx["sibling_agents_md"]:
         parts.append("\n## Sibling sub-project AGENTS.md files (for context/consistency)")
-        for name, content in ctx["sibling_agents_md"].items():  # type: ignore[union-attr]
+        for name, content in ctx["sibling_agents_md"].items():
             parts.append(f"### {name}/AGENTS.md\n```markdown\n{content}\n```")
 
     return "\n".join(parts)
 
 
-def _build_test_prompt(agents_md_content: str, ctx: dict[str, object], label: str) -> str:
+def _build_test_prompt(agents_md_content: str, ctx: Context, label: str) -> str:
     target = ctx["target_dir"] if not ctx["is_root"] else "the repository root"
     return f"""\
 You are an AI coding assistant assigned to work in {target} of an unfamiliar codebase for the
@@ -143,7 +143,7 @@ One of: GOOD (minor tweaks only) / NEEDS WORK (several meaningful gaps) / INCOMP
 """
 
 
-def _build_revise_prompt(agents_md_content: str, report: str, ctx: dict[str, object]) -> str:
+def _build_revise_prompt(agents_md_content: str, report: str, ctx: Context) -> str:
     target = ctx["target_dir"] if not ctx["is_root"] else "the repository root"
     return f"""\
 You are an expert software engineer. You wrote the following AGENTS.md for {target}:
@@ -183,9 +183,7 @@ def strip_markers(text: str) -> str:
     text = text.replace(MARKER_START + "\n", "").replace(MARKER_START, "")
     text = text.replace("\n" + MARKER_END, "").replace(MARKER_END, "")
     lines = [
-        ln
-        for ln in text.splitlines()
-        if not ln.strip().startswith("<!-- Add custom content below")
+        ln for ln in text.splitlines() if not ln.strip().startswith("<!-- Add custom content below")
     ]
     return "\n".join(lines).strip()
 

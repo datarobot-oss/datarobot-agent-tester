@@ -21,14 +21,9 @@ def call_llm(prompt: str, model: str, config: Config) -> str:
         RuntimeError: If the model returns an empty response.
     """
     try:
-        import litellm  # type: ignore[import]
+        import litellm
     except ImportError:
-        raise ImportError(
-            "litellm is not installed. Run:\n"
-            "  uv sync\n"
-            "or:\n"
-            "  pip install litellm"
-        )
+        raise ImportError("litellm is not installed. Run:\n  uv sync\nor:\n  pip install litellm")
 
     base_url = config.endpoint.rstrip("/")
     if base_url.endswith("/api/v2"):
@@ -54,4 +49,4 @@ def call_llm(prompt: str, model: str, config: Config) -> str:
             f"Model {call_model!r} returned an empty response. "
             "Try a different model via --model / --test-model or the AGENTS_MD_MODEL env var."
         )
-    return content.strip()
+    return str(content).strip()

@@ -23,15 +23,11 @@ class Config:
             "DATAROBOT_ENDPOINT", "https://app.datarobot.com/api/v2"
         )
     )
-    model: str = field(
-        default_factory=lambda: os.environ.get("AGENTS_MD_MODEL", DEFAULT_MODEL)
-    )
+    model: str = field(default_factory=lambda: os.environ.get("AGENTS_MD_MODEL", DEFAULT_MODEL))
     test_model: str = field(
         default_factory=lambda: os.environ.get("AGENTS_MD_TEST_MODEL", DEFAULT_TEST_MODEL)
     )
-    deployment_id: str | None = field(
-        default_factory=lambda: os.environ.get("LLM_DEPLOYMENT_ID")
-    )
+    deployment_id: str | None = field(default_factory=lambda: os.environ.get("LLM_DEPLOYMENT_ID"))
 
     def validate(self) -> None:
         """Raise ValueError if required fields are missing."""
