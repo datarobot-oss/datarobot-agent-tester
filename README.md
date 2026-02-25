@@ -176,16 +176,96 @@ task test          # run pytest with coverage
 
 ## GitHub Actions
 
-Two workflows are included:
+Both workflows support [`workflow_call`](https://docs.github.com/en/actions/sharing-automations/reusing-workflows),
+so any repo in the org can reference them directly instead of copy-pasting.
 
-**`ci.yml`** — runs on every push and PR across Python 3.11/3.12/3.13:
-- lint check
-- full test suite
+### Using the workflows from another repo
 
-**`agents-md.yml`** — requires `DATAROBOT_API_TOKEN` secret:
+**Minimal setup** — add two files to your repo:
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  ci:
+    uses: datarobot/datarobot-agent-tester/.github/workflows/ci.yml@main
+```
+
+```yaml
+# .github/workflows/agents-md.yml
+name: AGENTS.md
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  agents-md:
+    uses: datarobot/datarobot-agent-tester/.github/workflows/agents-md.yml@main
+    secrets: inherit   # passes DATAROBOT_API_TOKEN automatically
+```
+
+That's it. The workflow installs `datarobot-agent-tester` from this repo automatically — no
+local dependency needed.
+
+### Available inputs
+
+**`ci.yml`**
+
+| Input | Default | Description |
+|---|---|---|
+| `python-versions` | `["3.11","3.12","3.13"]` | JSON array of Python versions to test |
+| `working-directory` | `.` | Directory to run `task` commands from (for monorepos) |
+
+```yaml
+jobs:
+  ci:
+    uses: datarobot/datarobot-agent-tester/.github/workflows/ci.yml@main
+    with:
+      python-versions: '["3.11", "3.12"]'
+      working-directory: my_service
+```
+
+**`agents-md.yml`**
+
+| Input | Default | Description |
+|---|---|---|
+| `target-dir` | `.` | Directory to generate/test AGENTS.md for |
+| `skills-dir` | `skills` | Directory containing skill files to evaluate |
+| `python-version` | `3.11` | Python version to use |
+| `auto-commit` | `true` | Commit updated AGENTS.md back to the repo on push to main |
+
+```yaml
+jobs:
+  agents-md:
+    uses: datarobot/datarobot-agent-tester/.github/workflows/agents-md.yml@main
+    with:
+      target-dir: my_service
+      skills-dir: my_service/skills
+      auto-commit: false
+    secrets: inherit
+```
+
+### Required secret
+
+Add `DATAROBOT_API_TOKEN` to your repository or organization secrets
+(Settings → Secrets and variables → Actions). Using `secrets: inherit` is the simplest
+way to pass it through — or pass it explicitly:
+
+```yaml
+secrets:
+  DATAROBOT_API_TOKEN: ${{ secrets.DATAROBOT_API_TOKEN }}
+```
+
+### What the workflows do
+
+**`ci.yml`** — on every push and PR:
+- Static checks (`task lint-check`)
+- Full test suite (`task test`)
+- Python version matrix (3.11, 3.12, 3.13 by default)
+
+**`agents-md.yml`** — requires `DATAROBOT_API_TOKEN`:
 - On PRs: dry-run generate + evaluate existing AGENTS.md
-- On push to main: generate and commit updated AGENTS.md
-- All branches: evaluate all skills in `skills/`
-
-To enable: add `DATAROBOT_API_TOKEN` to your repository secrets
-(Settings → Secrets and variables → Actions).
+- On push to main: generate updated AGENTS.md and commit it back
+- All runs: evaluate every skill file in `skills-dir`

@@ -5,13 +5,26 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      python-versions:
+        description: 'JSON array of Python versions to test against'
+        type: string
+        default: '["3.11", "3.12", "3.13"]'
+      working-directory:
+        description: 'Directory to run task commands from (for monorepos)'
+        type: string
+        default: '.'
 
 jobs:
   python-checks:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ${{ fromJson(inputs.python-versions || '["3.11", "3.12", "3.13"]') }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory || '.' }}
 
     steps:
       - name: Checkout repository

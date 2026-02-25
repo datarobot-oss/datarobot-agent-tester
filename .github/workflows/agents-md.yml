@@ -7,6 +7,27 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      target-dir:
+        description: 'Directory to generate/test AGENTS.md for'
+        type: string
+        default: '.'
+      skills-dir:
+        description: 'Directory containing skill files to evaluate'
+        type: string
+        default: 'skills'
+      python-version:
+        description: 'Python version to use'
+        type: string
+        default: '3.11'
+      auto-commit:
+        description: 'Commit and push updated AGENTS.md on push to main'
+        type: boolean
+        default: true
+    secrets:
+      DATAROBOT_API_TOKEN:
+        required: true
 
 jobs:
   agents-md:
@@ -19,7 +40,7 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
+          python-version: ${{ inputs.python-version || '3.11' }}
 
       - name: Install Taskfile
         uses: arduino/setup-task@v2
@@ -27,31 +48,38 @@ jobs:
           version: 3.x
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies
-        run: task install
+      - name: Install datarobot-agent-tester
+        # When called from another repo, install the CLI directly rather than
+        # expecting a local Taskfile task. When running in this repo, use task install.
+        run: |
+          if [ -f "Taskfile.yaml" ] || [ -f "Taskfile.yml" ]; then
+            task install
+          else
+            uv tool install "git+https://github.com/datarobot/datarobot-agent-tester"
+          fi
 
       # On PRs: dry-run generate to catch issues, then evaluate the existing AGENTS.md
       - name: Generate AGENTS.md (dry run)
         if: github.event_name == 'pull_request'
-        run: task agents-generate -- --dry-run --no-copilot
+        run: dr-agent agents generate --dir "${{ inputs.target-dir || '.' }}" --dry-run --no-copilot
         env:
           DATAROBOT_API_TOKEN: ${{ secrets.DATAROBOT_API_TOKEN }}
 
       - name: Test AGENTS.md
         if: github.event_name == 'pull_request'
-        run: task agents-test
+        run: dr-agent agents test --dir "${{ inputs.target-dir || '.' }}"
         env:
           DATAROBOT_API_TOKEN: ${{ secrets.DATAROBOT_API_TOKEN }}
 
       # On push to main: write the updated AGENTS.md and commit it back
       - name: Generate AGENTS.md
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        run: task agents-generate
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call'
+        run: dr-agent agents generate --dir "${{ inputs.target-dir || '.' }}"
         env:
           DATAROBOT_API_TOKEN: ${{ secrets.DATAROBOT_API_TOKEN }}
 
       - name: Commit updated AGENTS.md
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && (inputs.auto-commit != false)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -71,7 +99,7 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
+          python-version: ${{ inputs.python-version || '3.11' }}
 
       - name: Install Taskfile
         uses: arduino/setup-task@v2
@@ -79,10 +107,21 @@ jobs:
           version: 3.x
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies
-        run: task install
+      - name: Install datarobot-agent-tester
+        run: |
+          if [ -f "Taskfile.yaml" ] || [ -f "Taskfile.yml" ]; then
+            task install
+          else
+            uv tool install "git+https://github.com/datarobot/datarobot-agent-tester"
+          fi
 
       - name: Test all skills
-        run: task skills-test
+        run: |
+          SKILLS="${{ inputs.skills-dir || 'skills' }}"
+          if [ -d "$SKILLS" ]; then
+            dr-agent skills test --all --dir "$SKILLS"
+          else
+            echo "No skills directory found at '$SKILLS' — skipping."
+          fi
         env:
           DATAROBOT_API_TOKEN: ${{ secrets.DATAROBOT_API_TOKEN }}
