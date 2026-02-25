@@ -2,6 +2,16 @@
 
 import subprocess
 from pathlib import Path
+from typing import TypedDict
+
+
+class Context(TypedDict):
+    target_dir: str
+    is_root: bool
+    tree: str
+    file_contents: dict[str, str]
+    copier_answers: dict[str, str]
+    sibling_agents_md: dict[str, str]
 
 PRIORITY_FILES = [
     "README.md",
@@ -83,7 +93,7 @@ def build_tree(files: list[str], target_subdir: str | None) -> str:
     return "\n".join(lines[:MAX_TREE_FILES])
 
 
-def gather_context(target_dir: Path, repo_root: Path) -> dict[str, object]:
+def gather_context(target_dir: Path, repo_root: Path) -> Context:
     """Return structured context about a directory suitable for prompt construction.
 
     Args:

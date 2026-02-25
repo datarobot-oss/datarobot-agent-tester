@@ -15,18 +15,24 @@ import os
 import sys
 from pathlib import Path
 
+from .config import Config
+
 try:
-    from dotenv import load_dotenv  # type: ignore[import]
+    from dotenv import load_dotenv
+
+    _has_dotenv = True
 except ImportError:
-    load_dotenv = None  # type: ignore[assignment]
+    _has_dotenv = False
 
 
 def _load_env() -> None:
-    if load_dotenv:
+    if _has_dotenv:
+        from dotenv import load_dotenv
+
         load_dotenv(dotenv_path=Path(".env"), override=False)
 
 
-def _make_config(args: argparse.Namespace) -> "Config":  # noqa: F821
+def _make_config(args: argparse.Namespace) -> Config:
     from .config import Config
 
     return Config(
