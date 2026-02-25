@@ -183,9 +183,7 @@ def strip_markers(text: str) -> str:
     text = text.replace(MARKER_START + "\n", "").replace(MARKER_START, "")
     text = text.replace("\n" + MARKER_END, "").replace(MARKER_END, "")
     lines = [
-        ln
-        for ln in text.splitlines()
-        if not ln.strip().startswith("<!-- Add custom content below")
+        ln for ln in text.splitlines() if not ln.strip().startswith("<!-- Add custom content below")
     ]
     return "\n".join(lines).strip()
 

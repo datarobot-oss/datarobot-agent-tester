@@ -23,12 +23,7 @@ def call_llm(prompt: str, model: str, config: Config) -> str:
     try:
         import litellm  # type: ignore[import]
     except ImportError:
-        raise ImportError(
-            "litellm is not installed. Run:\n"
-            "  uv sync\n"
-            "or:\n"
-            "  pip install litellm"
-        )
+        raise ImportError("litellm is not installed. Run:\n  uv sync\nor:\n  pip install litellm")
 
     base_url = config.endpoint.rstrip("/")
     if base_url.endswith("/api/v2"):

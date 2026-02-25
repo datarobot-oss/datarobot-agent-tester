@@ -33,8 +33,7 @@ def _make_config(args: argparse.Namespace) -> "Config":  # noqa: F821
         api_key=os.environ.get("DATAROBOT_API_TOKEN", ""),
         endpoint=os.environ.get("DATAROBOT_ENDPOINT", "https://app.datarobot.com/api/v2"),
         model=getattr(args, "model", None) or os.environ.get("AGENTS_MD_MODEL", ""),
-        test_model=getattr(args, "test_model", None)
-        or os.environ.get("AGENTS_MD_TEST_MODEL", ""),
+        test_model=getattr(args, "test_model", None) or os.environ.get("AGENTS_MD_TEST_MODEL", ""),
     )
 
 
@@ -194,9 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sk_test_p = skills_sub.add_parser("test", help="Evaluate a skill file")
     sk_test_p.add_argument("--skill", default=None, help="Path to skill file")
-    sk_test_p.add_argument(
-        "--all", action="store_true", help="Test all skills in --dir"
-    )
+    sk_test_p.add_argument("--all", action="store_true", help="Test all skills in --dir")
     sk_test_p.add_argument(
         "--dir", default="skills", help="Skills directory for --all. Default: skills/"
     )

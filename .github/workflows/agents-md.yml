@@ -48,12 +48,15 @@ jobs:
           version: 3.x
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install datarobot-agent-tester
-        # When called from another repo, install the CLI directly rather than
-        # expecting a local Taskfile task. When running in this repo, use task install.
+      - name: Install dependencies
+        run: task install
+
+      - name: Install dr-agent CLI
+        # In this repo: install the local checkout as a tool so dr-agent is on PATH.
+        # In any other repo calling this workflow: install from GitHub.
         run: |
-          if [ -f "Taskfile.yaml" ] || [ -f "Taskfile.yml" ]; then
-            task install
+          if [ "${{ github.repository }}" = "datarobot/datarobot-agent-tester" ]; then
+            uv tool install --editable .
           else
             uv tool install "git+https://github.com/datarobot/datarobot-agent-tester"
           fi
@@ -107,10 +110,13 @@ jobs:
           version: 3.x
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install datarobot-agent-tester
+      - name: Install dependencies
+        run: task install
+
+      - name: Install dr-agent CLI
         run: |
-          if [ -f "Taskfile.yaml" ] || [ -f "Taskfile.yml" ]; then
-            task install
+          if [ "${{ github.repository }}" = "datarobot/datarobot-agent-tester" ]; then
+            uv tool install --editable .
           else
             uv tool install "git+https://github.com/datarobot/datarobot-agent-tester"
           fi
