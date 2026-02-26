@@ -1,0 +1,114 @@
+scenarios:
+  - id: easy-health-endpoint
+    name: Add health check endpoint
+    difficulty: easy
+    prompt: |
+      Add a /health endpoint to the FastAPI backend that returns a JSON response
+      with the application status, version, and current timestamp. The endpoint
+      should be unauthenticated and suitable for load balancer health checks.
+    expected_files:
+      - backend/app/api/routes/health.py
+      - backend/app/api/routes/__init__.py
+      - backend/app/main.py
+      - backend/tests/test_health.py
+    expected_approach: |
+      Create a new route module for the health endpoint following the existing
+      route pattern. Register it in the FastAPI app. Return a simple JSON response
+      with status "ok", the app version, and a UTC timestamp. Add a test.
+    expected_patterns:
+      - Follow existing route module structure in backend/app/api/routes/
+      - Use FastAPI APIRouter for route registration
+      - Follow existing test patterns
+    common_pitfalls:
+      - Adding authentication to a health check endpoint
+      - Not registering the router in the main app
+      - Forgetting to add tests
+    acceptance_criteria:
+      - Health route file created in correct location
+      - Router registered in main app
+      - Returns JSON with status, version, timestamp
+      - No authentication required
+      - Test added
+
+  - id: easy-page-title
+    name: Update frontend page title
+    difficulty: easy
+    prompt: |
+      Update the React frontend application's page title from the default to
+      "DataRobot Agent Application". Also update the meta description tag to
+      describe the application as an AI agent management platform.
+    expected_files:
+      - frontend/index.html
+      - frontend/src/App.tsx
+    expected_approach: |
+      Modify the HTML template's <title> tag and add/update the meta description
+      tag. If the app uses React Helmet or a similar library, update the
+      component-level title as well.
+    expected_patterns:
+      - Check for existing title management (React Helmet, document.title)
+      - Follow existing HTML template conventions
+    common_pitfalls:
+      - Only updating one location when titles are set in multiple places
+      - Not checking if a title management library is used
+    acceptance_criteria:
+      - Page title updated to "DataRobot Agent Application"
+      - Meta description added or updated
+      - All title-setting locations updated consistently
+
+  - id: easy-document-env-var
+    name: Document a new environment variable
+    difficulty: easy
+    prompt: |
+      Add documentation for a new environment variable AGENT_MAX_RETRIES that
+      controls how many times the LangGraph agent retries a failed tool call.
+      Document it in the appropriate configuration files and README sections.
+    expected_files:
+      - README.md
+      - .env.example
+      - backend/app/config.py
+    expected_approach: |
+      Add the environment variable to .env.example with a sensible default (3).
+      Document it in the README's configuration section. Add it to the backend
+      config/settings module where other env vars are loaded.
+    expected_patterns:
+      - Follow existing env var documentation patterns in README
+      - Follow existing .env.example format
+      - Use the same config loading pattern as other settings
+    common_pitfalls:
+      - Not providing a sensible default value
+      - Missing one of the documentation locations
+      - Not following existing naming conventions for env vars
+    acceptance_criteria:
+      - Variable added to .env.example with default
+      - README updated with description
+      - Config module updated to read the variable
+
+  - id: easy-fix-circular-import
+    name: Fix circular import between modules
+    difficulty: easy
+    prompt: |
+      The backend has a circular import between the agent module and the tools
+      module. The agent module imports tool definitions, and the tools module
+      imports the agent state type. Fix this circular dependency without
+      changing the public API of either module.
+    expected_files:
+      - backend/app/agent/state.py
+      - backend/app/agent/__init__.py
+      - backend/app/agent/tools.py
+    expected_approach: |
+      Extract the shared state type into its own module (e.g., state.py) that
+      both the agent and tools modules can import from, breaking the circular
+      dependency. Use TYPE_CHECKING imports if needed for type hints.
+    expected_patterns:
+      - Use TYPE_CHECKING for type-only imports
+      - Extract shared types into dedicated modules
+      - Keep public API unchanged via __init__.py re-exports
+    common_pitfalls:
+      - Breaking the public API by moving types without re-exporting
+      - Using lazy imports instead of proper restructuring
+      - Not considering all import paths
+    acceptance_criteria:
+      - Circular import resolved
+      - Shared types in dedicated module
+      - Public API preserved
+      - All existing imports still work

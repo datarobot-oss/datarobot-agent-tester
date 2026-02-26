@@ -1,0 +1,99 @@
+.github/
+  workflows/
+    ci.yaml
+    deploy.yaml
+  copilot-instructions.md
+AGENTS.md
+README.md
+LICENSE
+.env.example
+.gitignore
+docker-compose.yaml
+Makefile
+backend/
+  app/
+    __init__.py
+    main.py
+    config.py
+    api/
+      __init__.py
+      routes/
+        __init__.py
+        chat.py
+      schemas/
+        __init__.py
+        chat.py
+      middleware/
+        __init__.py
+        cors.py
+    agent/
+      __init__.py
+      graph.py
+      nodes.py
+      state.py
+      tools/
+        __init__.py
+        web_search.py
+        calculator.py
+    models/
+      __init__.py
+    db/
+      __init__.py
+      session.py
+  tests/
+    __init__.py
+    conftest.py
+    test_chat.py
+    test_agent.py
+  pyproject.toml
+  Dockerfile
+frontend/
+  src/
+    App.tsx
+    main.tsx
+    index.css
+    routes.tsx
+    api/
+      client.ts
+      chat.ts
+    components/
+      ChatMessage.tsx
+      ChatInput.tsx
+      Sidebar.tsx
+      Layout.tsx
+    pages/
+      Chat.tsx
+    hooks/
+      useChat.ts
+    types/
+      index.ts
+  public/
+    favicon.ico
+  index.html
+  package.json
+  tsconfig.json
+  vite.config.ts
+  Dockerfile
+mcp_server/
+  __init__.py
+  server.py
+  resources/
+    __init__.py
+  tools/
+    __init__.py
+  tests/
+    __init__.py
+  pyproject.toml
+infra/
+  __main__.py
+  config.py
+  networking.py
+  Pulumi.yaml
+  Pulumi.dev.yaml
+  requirements.txt
+core/
+  lib/
+    __init__.py
+    http_client.py
+    utils.py
+  pyproject.toml

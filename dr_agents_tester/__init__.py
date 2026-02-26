@@ -23,7 +23,8 @@ Quick start::
 
 from .agents_md import AgentsMd
 from .config import Config
+from .eval import Evaluator
 from .skills import Skills
 
 __version__ = "0.1.0"
-__all__ = ["AgentsMd", "Config", "Skills", "__version__"]
+__all__ = ["AgentsMd", "Config", "Evaluator", "Skills", "__version__"]
