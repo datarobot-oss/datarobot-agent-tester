@@ -1,0 +1,198 @@
+scenarios:
+  - id: expert-rag-pipeline
+    name: End-to-end RAG pipeline
+    difficulty: expert
+    prompt: |
+      Implement a complete Retrieval-Augmented Generation (RAG) pipeline for the
+      agent application. This includes: document ingestion (PDF, Markdown, HTML),
+      chunking with overlap, embedding generation via the DataRobot API, storage
+      in a vector database, retrieval with re-ranking, and integration into the
+      LangGraph agent as a knowledge tool. Include a frontend UI for document
+      upload and management, and backend APIs for ingestion status tracking.
+    expected_files:
+      - backend/app/rag/ingestion.py
+      - backend/app/rag/chunking.py
+      - backend/app/rag/embeddings.py
+      - backend/app/rag/vectorstore.py
+      - backend/app/rag/retrieval.py
+      - backend/app/rag/__init__.py
+      - backend/app/api/routes/documents.py
+      - backend/app/api/schemas/documents.py
+      - backend/app/agent/tools/knowledge.py
+      - frontend/src/pages/Documents.tsx
+      - frontend/src/components/DocumentUpload.tsx
+      - frontend/src/api/documents.ts
+    expected_approach: |
+      Create a RAG module with separate concerns: ingestion parses documents,
+      chunking splits text with configurable overlap, embeddings calls the
+      DataRobot embedding API, vectorstore handles storage/retrieval. Add a
+      retrieval layer with re-ranking. Create an agent tool that queries the
+      RAG pipeline. Build backend APIs for document upload and status tracking.
+      Add frontend document management UI.
+    expected_patterns:
+      - Modular pipeline architecture (ingestion -> chunking -> embedding -> storage)
+      - Async processing for document ingestion
+      - LangGraph tool integration pattern
+      - File upload handling in FastAPI
+      - React file upload components
+    common_pitfalls:
+      - Synchronous document processing blocking the API
+      - Not handling large documents (memory issues)
+      - Missing chunking overlap leading to lost context
+      - Not implementing re-ranking (raw similarity is often insufficient)
+      - No progress tracking for long ingestion jobs
+    acceptance_criteria:
+      - Document ingestion for PDF, Markdown, HTML
+      - Configurable chunking with overlap
+      - Embedding generation via DataRobot API
+      - Vector storage and retrieval
+      - Re-ranking of results
+      - LangGraph knowledge tool
+      - Document management API
+      - Frontend upload and management UI
+      - Async ingestion with status tracking
+
+  - id: expert-observability
+    name: Full observability stack
+    difficulty: expert
+    prompt: |
+      Add comprehensive observability to the application: structured logging
+      with correlation IDs across all services (backend, agent, MCP server),
+      OpenTelemetry tracing for request flows through the LangGraph agent,
+      Prometheus metrics for API latency, agent execution time, and token usage,
+      and a health dashboard endpoint. Ensure traces span across service
+      boundaries and include LLM call details.
+    expected_files:
+      - backend/app/observability/logging.py
+      - backend/app/observability/tracing.py
+      - backend/app/observability/metrics.py
+      - backend/app/observability/__init__.py
+      - backend/app/api/middleware/tracing.py
+      - backend/app/api/middleware/logging.py
+      - backend/app/agent/callbacks/tracing.py
+      - backend/app/api/routes/metrics.py
+      - mcp_server/observability.py
+      - core/lib/observability.py
+    expected_approach: |
+      Implement structured JSON logging with correlation ID propagation via
+      context variables. Add OpenTelemetry instrumentation with custom spans
+      for LangGraph nodes and LLM calls. Create Prometheus metrics collectors
+      for key measurements. Add middleware for automatic request tracing and
+      logging. Create LangGraph callbacks for agent-level tracing. Ensure
+      trace context propagates across service boundaries.
+    expected_patterns:
+      - OpenTelemetry SDK instrumentation pattern
+      - Correlation ID propagation via contextvars
+      - Prometheus client metric types (Counter, Histogram, Gauge)
+      - FastAPI middleware for cross-cutting concerns
+      - LangGraph callback handlers for agent tracing
+    common_pitfalls:
+      - Not propagating trace context across service boundaries
+      - Missing correlation IDs in async contexts
+      - High-cardinality metric labels (e.g., per-user labels)
+      - Not tracing LLM calls (token usage, latency)
+      - Logging sensitive data (tokens, PII)
+    acceptance_criteria:
+      - Structured JSON logging with correlation IDs
+      - OpenTelemetry traces for full request lifecycle
+      - LLM call tracing with token counts
+      - Prometheus metrics endpoint
+      - Cross-service trace propagation
+      - No sensitive data in logs/traces
+      - Health dashboard endpoint
+
+  - id: expert-async-migration
+    name: Sync-to-async migration
+    difficulty: expert
+    prompt: |
+      Migrate the backend from synchronous to fully asynchronous operation.
+      This includes converting all database operations to use async SQLAlchemy,
+      converting HTTP client calls to use httpx async, updating the LangGraph
+      agent to use async tool execution, and ensuring all FastAPI endpoints
+      are async. Maintain backwards compatibility during the migration by
+      supporting both sync and async code paths where needed.
+    expected_files:
+      - backend/app/db/session.py
+      - backend/app/db/repositories/base.py
+      - backend/app/api/routes/conversations.py
+      - backend/app/api/routes/auth.py
+      - backend/app/agent/tools/vector_search.py
+      - backend/app/agent/tools/web_search.py
+      - backend/app/agent/graph.py
+      - backend/app/main.py
+      - core/lib/http_client.py
+    expected_approach: |
+      Migrate database layer first: switch to async SQLAlchemy engine and
+      sessions. Update repository pattern to async. Then migrate HTTP clients
+      to httpx AsyncClient. Convert LangGraph tools to async. Update all
+      FastAPI route handlers to async def. Use asyncio.to_thread() for any
+      remaining sync operations during transition. Update tests to use
+      pytest-asyncio.
+    expected_patterns:
+      - async SQLAlchemy session management
+      - httpx AsyncClient with connection pooling
+      - LangGraph async tool pattern
+      - asyncio.to_thread() for sync compatibility
+      - pytest-asyncio test patterns
+    common_pitfalls:
+      - Mixing sync and async database sessions
+      - Not closing async HTTP clients properly
+      - Blocking the event loop with sync calls
+      - Not updating all dependent code paths
+      - Breaking existing tests
+    acceptance_criteria:
+      - Async database operations
+      - Async HTTP client calls
+      - Async LangGraph tool execution
+      - All endpoints async
+      - No blocking calls on event loop
+      - Tests updated for async
+      - Backwards-compatible migration path
+
+  - id: expert-multi-tenant
+    name: Multi-tenant isolation
+    difficulty: expert
+    prompt: |
+      Implement multi-tenant isolation for the agent application so that
+      multiple organizations can use the same deployment with complete data
+      isolation. This includes: tenant-aware database schemas (row-level
+      security or schema-per-tenant), tenant resolution from JWT claims,
+      tenant-scoped agent state in LangGraph, tenant-isolated vector stores,
+      and tenant-aware Pulumi infrastructure for resource limits.
+    expected_files:
+      - backend/app/db/tenant.py
+      - backend/app/api/middleware/tenant.py
+      - backend/app/models/tenant.py
+      - backend/app/agent/tenant_state.py
+      - backend/app/rag/tenant_vectorstore.py
+      - infra/tenant.py
+      - infra/__main__.py
+      - backend/app/api/routes/admin/tenants.py
+      - backend/tests/test_tenant_isolation.py
+    expected_approach: |
+      Implement row-level security with a tenant_id column on all tables.
+      Add middleware to extract tenant from JWT and set it in request context.
+      Create tenant-aware database queries that always filter by tenant_id.
+      Scope LangGraph checkpointer state by tenant. Isolate vector store
+      collections per tenant. Add Pulumi resources for tenant-level rate
+      limiting. Build admin API for tenant management.
+    expected_patterns:
+      - Row-level security pattern with tenant_id
+      - Middleware for tenant context extraction
+      - contextvars for tenant propagation
+      - Scoped LangGraph checkpointer
+      - Namespaced vector collections
+    common_pitfalls:
+      - Missing tenant filter on any query (data leak)
+      - Not scoping agent state by tenant
+      - Tenant context lost in async operations
+      - Not testing cross-tenant data isolation
+      - Missing tenant_id on new tables
+    acceptance_criteria:
+      - All tables have tenant_id with row-level filtering
+      - Tenant extracted from JWT automatically
+      - Agent state scoped by tenant
+      - Vector store isolated by tenant
+      - Cross-tenant data access impossible
+      - Admin tenant management API
+      - Isolation tested explicitly

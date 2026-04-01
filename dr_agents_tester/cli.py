@@ -8,6 +8,9 @@ dr-agent agents revise     Revise AGENTS.md from saved report
 
 dr-agent skills test       Evaluate a skill file (or all with --all)
 dr-agent skills improve    Improve a skill from its saved report
+
+dr-agent eval run          Run AGENTS.md evaluation framework
+dr-agent eval report       Regenerate report from saved results
 """
 
 import argparse
@@ -125,6 +128,73 @@ def cmd_skills_improve(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# eval sub-commands
+# ---------------------------------------------------------------------------
+
+
+def cmd_eval_run(args: argparse.Namespace) -> None:
+    from .eval.models import ConditionType, Difficulty, EvalCondition
+    from .eval.runner import Evaluator
+
+    cfg = _make_config(args)
+    cfg.validate()
+
+    scenarios_dir = Path(args.scenarios).resolve()
+    repo_tree_path = Path(args.repo_tree).resolve()
+
+    conditions: list[EvalCondition] = [EvalCondition(condition_type=ConditionType.NO_CONTEXT)]
+
+    if args.agents_generated:
+        content = Path(args.agents_generated).read_text()
+        conditions.append(
+            EvalCondition(condition_type=ConditionType.GENERATED, agents_md_content=content)
+        )
+
+    if args.agents_refined:
+        content = Path(args.agents_refined).read_text()
+        conditions.append(
+            EvalCondition(condition_type=ConditionType.REFINED, agents_md_content=content)
+        )
+
+    difficulty_filter = None
+    if args.difficulty:
+        difficulty_filter = Difficulty(args.difficulty)
+
+    evaluator = Evaluator(
+        config=cfg,
+        scenarios_dir=scenarios_dir,
+        repo_tree_path=repo_tree_path,
+        conditions=conditions,
+        n_runs=args.n_runs,
+        difficulty_filter=difficulty_filter,
+    )
+
+    print(f"Running evaluation: {len(conditions)} conditions, n_runs={args.n_runs}")
+    report = evaluator.run()
+
+    output_dir = Path(args.output_dir).resolve()
+    md_path, json_path = evaluator.save_report(report, output_dir)
+    print(f"\nReport saved to:\n  {md_path}\n  {json_path}")
+
+
+def cmd_eval_report(args: argparse.Namespace) -> None:
+    import json as json_mod
+
+    from .eval.report import dict_to_report, generate_markdown_report
+
+    results_path = Path(args.results).resolve()
+    data = json_mod.loads(results_path.read_text())
+    report = dict_to_report(data)
+
+    output_dir = Path(args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    md_path = output_dir / "eval_report.md"
+    md_path.write_text(generate_markdown_report(report))
+    print(f"Report regenerated: {md_path}")
+
+
+# ---------------------------------------------------------------------------
 # Parser construction
 # ---------------------------------------------------------------------------
 
@@ -206,6 +276,37 @@ def build_parser() -> argparse.ArgumentParser:
     _add_dry_run(sk_imp_p)
     _add_common_model_args(sk_imp_p)
     sk_imp_p.set_defaults(func=cmd_skills_improve)
+
+    # ---- eval ----
+    eval_p = sub.add_parser("eval", help="AGENTS.md evaluation framework")
+    eval_sub = eval_p.add_subparsers(dest="command", required=True)
+
+    eval_run_p = eval_sub.add_parser("run", help="Run AGENTS.md evaluation")
+    eval_run_p.add_argument(
+        "--scenarios", required=True, help="Directory containing scenario YAML files"
+    )
+    eval_run_p.add_argument("--repo-tree", required=True, help="Path to repo file tree text file")
+    eval_run_p.add_argument("--agents-generated", default=None, help="Path to generated AGENTS.md")
+    eval_run_p.add_argument("--agents-refined", default=None, help="Path to refined AGENTS.md")
+    eval_run_p.add_argument("--n-runs", type=int, default=5, help="Runs per scenario (default: 5)")
+    eval_run_p.add_argument(
+        "--difficulty",
+        default=None,
+        choices=["easy", "medium", "hard", "expert"],
+        help="Only run scenarios of this difficulty",
+    )
+    eval_run_p.add_argument(
+        "--output-dir", default="results", help="Output directory for reports (default: results/)"
+    )
+    _add_common_model_args(eval_run_p)
+    eval_run_p.set_defaults(func=cmd_eval_run)
+
+    eval_report_p = eval_sub.add_parser("report", help="Regenerate report from saved results")
+    eval_report_p.add_argument("--results", required=True, help="Path to eval_results.json")
+    eval_report_p.add_argument(
+        "--output-dir", default="results", help="Output directory (default: results/)"
+    )
+    eval_report_p.set_defaults(func=cmd_eval_report)
 
     return parser
 

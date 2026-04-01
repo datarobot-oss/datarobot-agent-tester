@@ -69,3 +69,13 @@ tasks:
     desc: "✏️  Improve a skill based on its last test report"
     cmds:
       - "{{.UV_CMD}} run dr-agent skills improve {{.CLI_ARGS}}"
+
+  eval-run:
+    desc: "📊 Run AGENTS.md evaluation framework"
+    cmds:
+      - "{{.UV_CMD}} run dr-agent eval run {{.CLI_ARGS}}"
+
+  eval-report:
+    desc: "📄 Regenerate evaluation report from saved results"
+    cmds:
+      - "{{.UV_CMD}} run dr-agent eval report {{.CLI_ARGS}}"

@@ -1,0 +1,177 @@
+scenarios:
+  - id: medium-crud-endpoints
+    name: Add CRUD endpoints for conversations
+    difficulty: medium
+    prompt: |
+      Add full CRUD (Create, Read, Update, Delete) REST endpoints for managing
+      agent conversations. Each conversation has an id, title, created_at,
+      updated_at, and a list of messages. Include proper request/response
+      schemas, error handling, and pagination for the list endpoint.
+    expected_files:
+      - backend/app/api/routes/conversations.py
+      - backend/app/api/schemas/conversations.py
+      - backend/app/models/conversation.py
+      - backend/app/api/routes/__init__.py
+      - backend/tests/test_conversations.py
+    expected_approach: |
+      Create Pydantic schemas for request/response models. Add a data model
+      for conversations. Create a new route module with GET (list with pagination),
+      GET (single), POST, PUT/PATCH, and DELETE endpoints. Register routes.
+      Add comprehensive tests.
+    expected_patterns:
+      - Follow existing route module pattern
+      - Use Pydantic for request/response schemas
+      - Follow existing pagination patterns if any
+      - Use FastAPI dependency injection for common parameters
+    common_pitfalls:
+      - Missing pagination on list endpoint
+      - Not handling 404 for missing conversations
+      - Inconsistent error response format
+      - Not validating request bodies
+    acceptance_criteria:
+      - All CRUD endpoints implemented
+      - Proper Pydantic schemas
+      - Pagination on list endpoint
+      - 404 handling for missing resources
+      - Tests for each endpoint
+
+  - id: medium-langgraph-tool
+    name: Add a new LangGraph tool
+    difficulty: medium
+    prompt: |
+      Add a new tool to the LangGraph agent that allows it to search a vector
+      database for relevant documents. The tool should accept a query string
+      and return the top-k most relevant document chunks with their similarity
+      scores. It needs to integrate with the existing tool registration system.
+    expected_files:
+      - backend/app/agent/tools/vector_search.py
+      - backend/app/agent/tools/__init__.py
+      - backend/app/agent/graph.py
+      - backend/tests/test_vector_search_tool.py
+    expected_approach: |
+      Create a new tool module following the existing tool pattern. Define the
+      tool function with proper type hints and docstring (LangGraph uses the
+      docstring for tool description). Register it in the tools __init__ and
+      bind it to the agent graph. Add unit tests with mocked vector DB calls.
+    expected_patterns:
+      - Follow existing tool definition pattern
+      - Use @tool decorator from LangChain/LangGraph
+      - Include comprehensive docstring for LLM tool selection
+      - Follow existing test mocking patterns
+    common_pitfalls:
+      - Not providing a clear tool description for the LLM
+      - Missing error handling for vector DB connection failures
+      - Not following the existing tool registration pattern
+      - Forgetting to bind the tool to the graph
+    acceptance_criteria:
+      - Tool function with proper decorator and docstring
+      - Registered in tool collection
+      - Bound to agent graph
+      - Error handling for DB failures
+      - Unit tests with mocked DB
+
+  - id: medium-settings-page
+    name: Add settings page to frontend
+    difficulty: medium
+    prompt: |
+      Add a new Settings page to the React frontend that allows users to
+      configure their agent preferences: default model selection, temperature,
+      max tokens, and system prompt. The page should persist settings to the
+      backend API and load existing settings on mount.
+    expected_files:
+      - frontend/src/pages/Settings.tsx
+      - frontend/src/components/SettingsForm.tsx
+      - frontend/src/api/settings.ts
+      - frontend/src/routes.tsx
+      - backend/app/api/routes/settings.py
+      - backend/app/api/schemas/settings.py
+    expected_approach: |
+      Create a Settings page component with a form for preferences. Add an
+      API client module for settings CRUD. Create backend endpoints to
+      store/retrieve settings. Add the route to the router configuration.
+      Use controlled form components with validation.
+    expected_patterns:
+      - Follow existing page component patterns
+      - Use existing API client pattern for backend calls
+      - Follow existing form handling patterns (controlled components)
+      - Follow existing route registration pattern
+    common_pitfalls:
+      - Not handling loading states and errors in the UI
+      - Missing form validation
+      - Not persisting to backend (only local state)
+      - Forgetting to add route to router
+    acceptance_criteria:
+      - Settings page with form for all preferences
+      - API integration for load/save
+      - Form validation
+      - Loading and error states
+      - Route registered
+
+  - id: medium-mcp-resource
+    name: Add MCP resource for agent status
+    difficulty: medium
+    prompt: |
+      Add a new MCP (Model Context Protocol) resource to the MCP server that
+      exposes the current agent status, including active conversations, queued
+      tasks, and system resource utilization. The resource should be
+      subscribable for real-time updates.
+    expected_files:
+      - mcp_server/resources/agent_status.py
+      - mcp_server/resources/__init__.py
+      - mcp_server/server.py
+      - mcp_server/tests/test_agent_status.py
+    expected_approach: |
+      Create a new resource module following the MCP resource pattern. Define
+      the resource schema, implement the read handler, and add subscription
+      support for real-time updates. Register the resource in the MCP server.
+    expected_patterns:
+      - Follow existing MCP resource patterns
+      - Use MCP SDK resource decorators
+      - Follow existing subscription patterns
+      - Use proper JSON schema for resource data
+    common_pitfalls:
+      - Not following MCP protocol for resource URIs
+      - Missing subscription support when the resource changes
+      - Not handling errors when agent data is unavailable
+      - Incorrect resource schema definition
+    acceptance_criteria:
+      - Resource registered with proper URI
+      - Returns current agent status data
+      - Subscription support for updates
+      - Error handling for unavailable data
+      - Tests for resource read and subscription
+
+  - id: medium-websocket-streaming
+    name: Add WebSocket streaming for agent responses
+    difficulty: medium
+    prompt: |
+      Implement WebSocket support in the FastAPI backend so that agent responses
+      can be streamed token-by-token to the React frontend. The frontend should
+      display tokens as they arrive, similar to ChatGPT's streaming interface.
+    expected_files:
+      - backend/app/api/routes/ws.py
+      - backend/app/api/routes/__init__.py
+      - backend/app/agent/streaming.py
+      - frontend/src/hooks/useWebSocket.ts
+      - frontend/src/components/StreamingMessage.tsx
+    expected_approach: |
+      Add a FastAPI WebSocket endpoint that connects to the LangGraph agent's
+      streaming interface. Create a custom hook on the frontend for WebSocket
+      connection management. Build a streaming message component that renders
+      tokens as they arrive. Handle reconnection and error states.
+    expected_patterns:
+      - Use FastAPI WebSocket support
+      - Use LangGraph's streaming callbacks
+      - Follow React hooks pattern for WebSocket management
+      - Follow existing component patterns
+    common_pitfalls:
+      - Not handling WebSocket disconnection/reconnection
+      - Missing error handling for streaming failures
+      - Not implementing backpressure for fast token streams
+      - Memory leaks from unclosed WebSocket connections
+    acceptance_criteria:
+      - WebSocket endpoint for token streaming
+      - Frontend hook for connection management
+      - Streaming message display component
+      - Reconnection handling
+      - Proper cleanup on unmount

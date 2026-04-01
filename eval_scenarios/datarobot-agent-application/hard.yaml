@@ -1,0 +1,210 @@
+scenarios:
+  - id: hard-jwt-auth
+    name: Cross-cutting JWT authentication
+    difficulty: hard
+    prompt: |
+      Implement JWT-based authentication across the entire application. This
+      includes: a login/register API in the backend, JWT token generation and
+      validation middleware, protected route guards in the React frontend,
+      token refresh logic, and updating the MCP server to validate tokens
+      from connected clients.
+    expected_files:
+      - backend/app/api/routes/auth.py
+      - backend/app/api/middleware/jwt.py
+      - backend/app/api/schemas/auth.py
+      - backend/app/models/user.py
+      - frontend/src/contexts/AuthContext.tsx
+      - frontend/src/api/auth.ts
+      - frontend/src/components/ProtectedRoute.tsx
+      - mcp_server/auth.py
+    expected_approach: |
+      Implement backend auth endpoints (register, login, refresh). Add JWT
+      middleware to validate tokens on protected routes. Create a frontend
+      auth context for token management. Add protected route wrapper
+      component. Implement token refresh flow. Update MCP server to validate
+      tokens. Use bcrypt for password hashing, proper JWT expiry times.
+    expected_patterns:
+      - FastAPI dependency injection for auth
+      - React Context pattern for auth state
+      - Proper JWT claims (sub, exp, iat)
+      - Middleware pattern for cross-cutting concerns
+    common_pitfalls:
+      - Storing JWT in localStorage (use httpOnly cookies)
+      - Not implementing token refresh
+      - Missing CORS configuration for auth headers
+      - Not protecting all necessary routes
+      - Weak password hashing
+    acceptance_criteria:
+      - Login/register endpoints
+      - JWT generation with proper claims
+      - Middleware for route protection
+      - Frontend auth context and protected routes
+      - Token refresh flow
+      - MCP server token validation
+      - Secure password storage
+
+  - id: hard-approval-workflow
+    name: Multi-step approval workflow for agent actions
+    difficulty: hard
+    prompt: |
+      Implement a human-in-the-loop approval workflow for the LangGraph agent.
+      When the agent wants to perform a high-risk action (e.g., modifying data,
+      calling external APIs), it should pause execution, notify the user via
+      the frontend, wait for approval/rejection, and then resume or abort.
+      Include an approval queue UI and audit logging.
+    expected_files:
+      - backend/app/agent/approval.py
+      - backend/app/agent/graph.py
+      - backend/app/api/routes/approvals.py
+      - backend/app/api/schemas/approvals.py
+      - backend/app/models/approval.py
+      - frontend/src/pages/Approvals.tsx
+      - frontend/src/components/ApprovalCard.tsx
+      - frontend/src/api/approvals.ts
+    expected_approach: |
+      Add an interrupt mechanism to the LangGraph graph that pauses at approval
+      checkpoints. Create backend endpoints for listing, approving, and rejecting
+      pending actions. Build a frontend approval queue page. Use LangGraph's
+      built-in interrupt/resume capabilities. Add audit logging for all
+      approval decisions.
+    expected_patterns:
+      - LangGraph interrupt/human-in-the-loop pattern
+      - Event-driven notification pattern
+      - Audit logging pattern
+      - State persistence for paused workflows
+    common_pitfalls:
+      - Not persisting agent state across approval waits
+      - Race conditions with concurrent approvals
+      - Missing timeout handling for stale approval requests
+      - Not logging approval decisions for audit
+    acceptance_criteria:
+      - Agent pauses at approval checkpoints
+      - API for listing/approving/rejecting
+      - Frontend approval queue UI
+      - State persisted across pause/resume
+      - Audit logging
+      - Timeout handling
+
+  - id: hard-pulumi-db
+    name: Pulumi database provisioning
+    difficulty: hard
+    prompt: |
+      Add Pulumi infrastructure code to provision a PostgreSQL database on AWS
+      RDS, including the VPC security group rules, subnet group, parameter
+      group, and automated backups. The database credentials should be stored
+      in AWS Secrets Manager and injected into the backend application config.
+    expected_files:
+      - infra/database.py
+      - infra/security_groups.py
+      - infra/secrets.py
+      - infra/__main__.py
+      - infra/Pulumi.yaml
+      - backend/app/config.py
+    expected_approach: |
+      Create Pulumi resource definitions for RDS PostgreSQL instance with proper
+      networking (security groups, subnet groups). Set up parameter group for
+      PostgreSQL tuning. Configure automated backups and encryption. Store
+      credentials in Secrets Manager. Update backend config to read from
+      Secrets Manager or environment variables injected by the deployment.
+    expected_patterns:
+      - Follow existing Pulumi project structure
+      - Use Pulumi component resources for grouping
+      - Follow AWS well-architected patterns for RDS
+      - Use Pulumi config for environment-specific values
+    common_pitfalls:
+      - Hardcoding database credentials
+      - Not restricting security group ingress to application only
+      - Missing encryption at rest and in transit
+      - Not configuring automated backups
+      - Putting DB in public subnet
+    acceptance_criteria:
+      - RDS instance with proper VPC networking
+      - Security group restricting access
+      - Credentials in Secrets Manager
+      - Automated backups configured
+      - Encryption enabled
+      - Backend config updated
+
+  - id: hard-state-refactor
+    name: State management refactor to Zustand
+    difficulty: hard
+    prompt: |
+      Refactor the React frontend's state management from prop drilling and
+      scattered useState/useContext to Zustand. Identify all shared state
+      (conversations, user preferences, agent status, UI state), create
+      appropriate stores, and migrate all components. Ensure no regressions
+      in functionality.
+    expected_files:
+      - frontend/src/stores/conversationStore.ts
+      - frontend/src/stores/preferencesStore.ts
+      - frontend/src/stores/agentStore.ts
+      - frontend/src/stores/uiStore.ts
+      - frontend/src/stores/index.ts
+      - frontend/src/pages/Chat.tsx
+      - frontend/src/pages/Settings.tsx
+      - frontend/src/components/Sidebar.tsx
+      - frontend/src/App.tsx
+    expected_approach: |
+      Audit existing state management to identify all shared state. Group state
+      into logical stores. Create Zustand stores with proper TypeScript types.
+      Migrate components one by one, replacing prop drilling and context with
+      store selectors. Use Zustand middleware for persistence where needed.
+      Verify no regressions with existing tests.
+    expected_patterns:
+      - Zustand store creation with TypeScript
+      - Selector pattern for minimizing re-renders
+      - Zustand persist middleware for user preferences
+      - Follow existing component structure
+    common_pitfalls:
+      - Migrating all state at once instead of incrementally
+      - Not using selectors (subscribing to entire store)
+      - Losing reactivity by not properly selecting state
+      - Breaking existing component tests
+    acceptance_criteria:
+      - All shared state moved to Zustand stores
+      - Components use store selectors
+      - Persistence for user preferences
+      - No prop drilling for shared state
+      - Existing functionality preserved
+
+  - id: hard-plugin-system
+    name: Agent tool plugin system
+    difficulty: hard
+    prompt: |
+      Design and implement a plugin system for the LangGraph agent that allows
+      third-party tool plugins to be loaded dynamically. Plugins should be
+      Python packages that follow a defined interface, can be installed via pip,
+      and are discovered and loaded at startup. Include a plugin manifest format,
+      validation, and a registry.
+    expected_files:
+      - backend/app/agent/plugins/interface.py
+      - backend/app/agent/plugins/registry.py
+      - backend/app/agent/plugins/loader.py
+      - backend/app/agent/plugins/__init__.py
+      - backend/app/agent/graph.py
+      - backend/app/config.py
+      - backend/tests/test_plugin_system.py
+    expected_approach: |
+      Define an abstract plugin interface (Protocol or ABC) that plugins must
+      implement. Create a registry that discovers plugins via entry points
+      (pkg_resources/importlib.metadata). Build a loader that validates plugins
+      against the interface and registers their tools with the agent graph.
+      Add configuration for enabling/disabling plugins.
+    expected_patterns:
+      - Python entry_points for plugin discovery
+      - Protocol/ABC for plugin interface
+      - Registry pattern for plugin management
+      - Factory pattern for tool creation
+    common_pitfalls:
+      - Not validating plugin interface compliance
+      - Missing error handling for broken plugins
+      - Not isolating plugin failures from core agent
+      - Security concerns with arbitrary code loading
+    acceptance_criteria:
+      - Plugin interface defined
+      - Discovery via entry points
+      - Validation and loading
+      - Registry for managing active plugins
+      - Error isolation
+      - Configuration for enable/disable
+      - Tests with mock plugins
