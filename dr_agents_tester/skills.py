@@ -6,6 +6,7 @@ module evaluates whether a skill prompt would produce high-quality, consistent
 results and can apply LLM feedback to improve it.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -21,17 +22,54 @@ NOTES_SUFFIX = ".skill-revision-notes.md"
 # ---------------------------------------------------------------------------
 
 
-def _build_skill_test_prompt(skill_name: str, skill_content: str) -> str:
-    return f"""\
-You are an expert prompt engineer evaluating AI coding assistant skills.
+def _extract_allowed_tools(skill_content: str) -> list[str]:
+    """Parse the allowed-tools list from YAML frontmatter, if present."""
+    fm_match = re.match(r"^---\n(.*?\n)---\n", skill_content, re.DOTALL)
+    if not fm_match:
+        return []
+    fm = fm_match.group(1)
+    line_match = re.search(r"^allowed-tools:\s*(.+)$", fm, re.MULTILINE)
+    if not line_match:
+        return []
+    raw = line_match.group(1).strip()
+    # Handle inline list:  tool1, tool2, tool3
+    return [t.strip() for t in raw.split(",") if t.strip()]
 
-A "skill" is a markdown instruction file that tells an AI assistant how to handle a specific
-task. The skill below is named "{skill_name}".
+
+def _build_skill_test_prompt(skill_name: str, skill_content: str) -> str:
+    allowed_tools = _extract_allowed_tools(skill_content)
+
+    if allowed_tools:
+        tool_list = "\n".join(f"  - {t}" for t in allowed_tools)
+        tool_context = f"""
+## Agent execution context
+
+This skill will be loaded by an AI agent (e.g. Claude, Cursor, or a custom agent) that has
+access to **only** the following tools — nothing else:
+
+{tool_list}
+
+The agent has NO shell access, NO ability to run CLI commands, NO filesystem access beyond
+what those tools expose, and NO ability to install packages. It cannot browse the web, run
+scripts, or call any API not covered by the tools above.
+
+**Critically evaluate every step** in the skill against this tool list. If the skill instructs
+the agent to do something that requires a capability not in the list above, that is a fatal
+flaw — the agent will either stall, hallucinate a capability, or produce wrong results.
+"""
+    else:
+        tool_context = ""
+
+    return f"""\
+You are an expert prompt engineer evaluating AI agent skills.
+
+A "skill" is a markdown instruction file that tells an AI agent (such as Claude, Cursor, or a
+custom coding agent) how to handle a specific task. The skill below is named "{skill_name}".
 
 <skill>
 {skill_content}
 </skill>
-
+{tool_context}
 ## Your task
 
 Evaluate this skill from two perspectives:
@@ -41,6 +79,7 @@ Mentally simulate using these instructions for 2-3 representative tasks this ski
 - Are the instructions clear enough to follow without ambiguity?
 - Would two different agents following this skill produce consistent results?
 - Are there edge cases the skill doesn't address that would leave an agent guessing?
+- (If allowed-tools are declared) Can every step be completed with only the listed tools?
 
 ### 2. As a prompt engineer reviewing the skill
 - Is the purpose of the skill stated clearly upfront?
