@@ -164,8 +164,8 @@ def register_skills_e2e(
     hash_file: Path,
     force_all_env: str = "SKILLS_E2E_FORCE_ALL",
     default_test_model: str = _DEFAULT_TEST_MODEL,
-) -> tuple[Callable[..., None], Callable[..., None]]:
-    """Build a ``(pytest_generate_tests, test_skill_quality)`` pair.
+) -> tuple[Callable[..., None], Callable[..., None], Callable[..., None]]:
+    """Build a ``(pytest_generate_tests, test_skill_quality, _hash_store)`` triple.
 
     Parameters
     ----------
@@ -185,9 +185,11 @@ def register_skills_e2e(
 
     Returns
     -------
-    tuple[Callable, Callable]
-        A ``(pytest_generate_tests, test_skill_quality)`` pair ready to be
-        assigned directly into a test module's namespace.
+    tuple[Callable, Callable, Callable]
+        A ``(pytest_generate_tests, test_skill_quality, _hash_store)`` triple
+        ready to be assigned directly into a test module's namespace.  All
+        three names must be assigned so that pytest can discover the
+        session-scoped ``_hash_store`` fixture.
     """
     force_all = os.environ.get(force_all_env, "").lower() in ("1", "true", "yes")
 
@@ -233,13 +235,17 @@ def register_skills_e2e(
                 pytest.skip(f"LLM unavailable in this environment — {exc}")
             raise
 
-        _hash_store.update(skill_key, skill_path)
-
+        # Update hash only after a passing verdict so a failing skill is
+        # re-evaluated on the next run rather than silently skipped.
         assert verdict_passes(report), (
             f"Skill '{skill_path.parent.name}' is INCOMPLETE.\n\n{report}"
         )
+        _hash_store.update(skill_key, skill_path)
 
-    return pytest_generate_tests, test_skill_quality
+    # Return all three so the consuming module can assign them at module level,
+    # which is required for pytest to discover the session-scoped _hash_store
+    # fixture (pytest only finds fixtures in module scope / conftest.py).
+    return pytest_generate_tests, test_skill_quality, _hash_store
 
 
 def make_skill_e2e_test(
@@ -247,13 +253,14 @@ def make_skill_e2e_test(
     hash_file: Path,
     force_all_env: str = "SKILLS_E2E_FORCE_ALL",
     default_test_model: str = _DEFAULT_TEST_MODEL,
-) -> tuple[Callable[..., None], Callable[..., None]]:
+) -> tuple[Callable[..., None], Callable[..., None], Callable[..., None]]:
     """Convenience wrapper around :func:`register_skills_e2e`.
 
-    Returns a fully configured ``(pytest_generate_tests, test_skill_quality)``
-    pair.  Assign both names into your test module's global namespace::
+    Returns a fully configured ``(pytest_generate_tests, test_skill_quality,
+    _hash_store)`` triple.  Assign **all three** names into your test module's
+    global namespace so pytest can discover the session-scoped fixture::
 
-        pytest_generate_tests, test_skill_quality = make_skill_e2e_test(
+        pytest_generate_tests, test_skill_quality, _hash_store = make_skill_e2e_test(
             skills_dir=Path(__file__).resolve().parents[2] / "skills",
             hash_file=Path(__file__).resolve().parent / "skill_hashes.json",
         )
