@@ -117,17 +117,32 @@ def parse_verdict(report: str) -> str:
 
     Returns one of ``"GOOD"``, ``"NEEDS WORK"``, ``"INCOMPLETE"``, or
     ``"UNKNOWN"`` when the verdict line cannot be found.
+
+    The LLM formats the verdict line as e.g. ``**NEEDS WORK** — explanation``.
+    We only check the label portion (before any em-dash) to avoid false
+    matches where the explanation text itself contains the word "incomplete".
     """
     match = re.search(
         r"###\s+Overall\s+verdict.*?\n(.+?)(?:\n|$)",
         report,
         re.IGNORECASE | re.DOTALL,
     )
-    text = match.group(1).strip().upper() if match else report.upper()
+    full_line = match.group(1).strip().upper() if match else report.upper()
+
+    # Only inspect the label part — everything before the first em-dash or
+    # regular dash separator so "NEEDS WORK — ...incomplete results..." doesn't
+    # trigger a false INCOMPLETE match.
+    label = re.split(r"\s*[—–-]\s*", full_line, maxsplit=1)[0].strip()
 
     for token in ("INCOMPLETE", "NEEDS WORK", "GOOD"):
-        if token in text:
+        if token in label:
             return token
+
+    # Fallback: search the whole line (handles unusual LLM formatting)
+    for token in ("INCOMPLETE", "NEEDS WORK", "GOOD"):
+        if token in full_line:
+            return token
+
     return "UNKNOWN"
 
 
