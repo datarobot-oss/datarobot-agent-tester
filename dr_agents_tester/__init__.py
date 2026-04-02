@@ -26,5 +26,9 @@ from .config import Config
 from .eval import Evaluator
 from .skills import Skills
 
+# pytest_plugin is intentionally NOT imported here — it requires pytest which
+# is a dev-only dependency.  Import directly when needed:
+#   from dr_agents_tester.pytest_plugin import make_skill_e2e_test
+
 __version__ = "0.1.0"
 __all__ = ["AgentsMd", "Config", "Evaluator", "Skills", "__version__"]
