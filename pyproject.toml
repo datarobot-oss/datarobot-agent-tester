@@ -10,13 +10,34 @@ name = "datarobot-agent-tester"
 version = "0.1.0"
 description = "Generate, test, and improve AGENTS.md files and AI coding skills via the DataRobot LLM Gateway"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "DataRobot", email = "oss-community-management@datarobot.com" }]
+maintainers = [{ name = "Jeremy Johnson", email = "jeremy.johnson@datarobot.com" }]
 requires-python = ">=3.11"
+keywords = ["agents", "agents.md", "llm", "ai", "testing", "evaluation", "datarobot"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
     "litellm>=1.0",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/datarobot-oss/datarobot-agent-tester"
+Repository = "https://github.com/datarobot-oss/datarobot-agent-tester"
+Issues = "https://github.com/datarobot-oss/datarobot-agent-tester/issues"
 
 [project.scripts]
 dr-agent = "dr_agents_tester.cli:main"

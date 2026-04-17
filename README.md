@@ -19,16 +19,16 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 # Install as a library in your project
-uv add git+https://github.com/datarobot/datarobot-agent-tester
+uv add datarobot-agent-tester
 
 # Or install globally as a tool
-uv tool install git+https://github.com/datarobot/datarobot-agent-tester
+uv tool install datarobot-agent-tester
 ```
 
 To work on the library itself:
 
 ```bash
-git clone https://github.com/datarobot/datarobot-agent-tester
+git clone https://github.com/datarobot-oss/datarobot-agent-tester
 cd datarobot-agent-tester
 task install
 ```
