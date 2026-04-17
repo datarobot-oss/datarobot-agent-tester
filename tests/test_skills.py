@@ -10,7 +10,9 @@ from dr_agents_tester.skills import NOTES_SUFFIX, REPORT_SUFFIX, Skills
 
 class TestSkillsTest:
     def test_test_saves_report(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         skill = tmp_path / "commit.md"
         skill.write_text("# Skill: Commit\nWrite good commits.")
@@ -26,14 +28,18 @@ class TestSkillsTest:
         assert report_path.read_text() == report
 
     def test_test_missing_file_exits(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         s = Skills(fake_config)
         with pytest.raises(SystemExit):
             s.test(tmp_path / "nonexistent.md")
 
     def test_test_uses_test_model(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         skill = tmp_path / "review.md"
         skill.write_text("# Review skill")
@@ -49,7 +55,9 @@ class TestSkillsTest:
 
 class TestSkillsImprove:
     def test_improve_writes_updated_skill(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         skill = tmp_path / "commit.md"
         skill.write_text("# Skill: Commit\nOld content.")
@@ -71,7 +79,9 @@ class TestSkillsImprove:
         assert notes_path.exists()
 
     def test_improve_dry_run_does_not_write(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         skill = tmp_path / "commit.md"
         original = "# Original content"
@@ -86,7 +96,9 @@ class TestSkillsImprove:
         assert skill.read_text() == original
 
     def test_improve_missing_report_exits(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         skill = tmp_path / "commit.md"
         skill.write_text("# content")
@@ -95,7 +107,9 @@ class TestSkillsImprove:
             s.improve(skill)
 
     def test_improve_handles_missing_delimiter(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         skill = tmp_path / "commit.md"
         skill.write_text("# content")
@@ -111,7 +125,9 @@ class TestSkillsImprove:
 
 class TestSkillsTestAll:
     def test_test_all_tests_each_md_file(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         (tmp_path / "commit.md").write_text("# Commit skill")
         (tmp_path / "review.md").write_text("# Review skill")
@@ -128,7 +144,9 @@ class TestSkillsTestAll:
         assert len(results) == 2  # report file excluded
 
     def test_test_all_empty_dir_returns_empty(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         s = Skills(fake_config)
         results = s.test_all(tmp_path)

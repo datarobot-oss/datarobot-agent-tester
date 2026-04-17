@@ -43,9 +43,7 @@ class TestComputeOverallScore:
             pitfall_avoidance=0.2,
             completeness=0.0,
         )
-        expected = (
-            0.8 * 0.25 + 0.6 * 0.30 + 0.4 * 0.15 + 0.2 * 0.15 + 0.0 * 0.15
-        )
+        expected = 0.8 * 0.25 + 0.6 * 0.30 + 0.4 * 0.15 + 0.2 * 0.15 + 0.0 * 0.15
         assert abs(compute_overall_score(card) - round(expected, 4)) < 1e-9
 
     def test_approach_has_highest_weight(self) -> None:

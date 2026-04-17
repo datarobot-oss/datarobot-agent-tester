@@ -1,6 +1,6 @@
 """Tests for eval/prompts.py prompt construction and response parsing."""
 
-from dr_agents_tester.eval.models import Difficulty, Scenario, ScoreCard
+from dr_agents_tester.eval.models import Difficulty, Scenario
 from dr_agents_tester.eval.prompts import (
     build_agent_prompt,
     build_scoring_prompt,
