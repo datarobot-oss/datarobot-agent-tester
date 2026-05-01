@@ -1,9 +1,7 @@
 """Tests for AGENTS.md generation, marker handling, and file management."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from dr_agents_tester.agents_md import (
     MARKER_END,
@@ -87,11 +85,7 @@ class TestApplyGeneratedContent:
 
     def test_uses_rindex_for_outermost_end_marker(self) -> None:
         # Edge case: nested marker in content (model echoed it back)
-        existing = (
-            f"{MARKER_START}\n"
-            f"# Content with {MARKER_END} embedded\n"
-            f"{MARKER_END}"
-        )
+        existing = f"{MARKER_START}\n# Content with {MARKER_END} embedded\n{MARKER_END}"
         result = apply_generated_content(existing, "# Clean")
         assert result.count(MARKER_START) == 1
         assert result.count(MARKER_END) == 1
@@ -99,7 +93,9 @@ class TestApplyGeneratedContent:
 
 class TestAgentsMdGenerate:
     def test_generate_calls_llm_and_writes_file(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         (tmp_path / ".git").mkdir()
 
@@ -127,7 +123,9 @@ class TestAgentsMdGenerate:
         assert "# Generated AGENTS.md" in content
 
     def test_generate_dry_run_does_not_write(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         (tmp_path / ".git").mkdir()
 
@@ -153,7 +151,9 @@ class TestAgentsMdGenerate:
 
 class TestAgentsMdTest:
     def test_test_saves_report(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         (tmp_path / ".git").mkdir()
         agents_md = tmp_path / "AGENTS.md"
@@ -182,7 +182,9 @@ class TestAgentsMdTest:
 
 class TestAgentsMdRevise:
     def test_revise_updates_agents_md(
-        self, tmp_path: Path, fake_config: "Config"  # noqa: F821
+        self,
+        tmp_path: Path,
+        fake_config: "Config",  # noqa: F821
     ) -> None:
         (tmp_path / ".git").mkdir()
         (tmp_path / "AGENTS.md").write_text(f"{MARKER_START}\n# Old\n{MARKER_END}\n")

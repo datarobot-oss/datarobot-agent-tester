@@ -10,8 +10,8 @@ from dr_agents_tester.eval.models import (
     EvaluationReport,
     LLMUsage,
     PairwiseComparison,
-    ScoreCard,
     Scenario,
+    ScoreCard,
 )
 
 

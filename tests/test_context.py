@@ -4,8 +4,6 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from dr_agents_tester.context import (
     build_tree,
     find_repo_root,
