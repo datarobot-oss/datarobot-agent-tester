@@ -29,10 +29,8 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
-    # Upper bound on litellm: 1.83.8+ regressed to a hard-pin of the
-    # vulnerable aiohttp==3.13.3; 1.83.1–1.83.7 pin aiohttp==3.13.5 (patched).
-    "litellm>=1.83.0,<1.83.8",
-    "python-dotenv>=1.0",
+    "litellm>=1.83.14",
+    "python-dotenv>=1.2.2",
     "pyyaml>=6.0",
 ]
 
