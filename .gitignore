@@ -29,6 +29,9 @@ coverage.xml
 .agents-md-report.md
 .agents-md-revision-notes.md
 
+# SkillOpt run artifacts (per-iter dirs; share via report.html or by zipping the run dir)
+results/skillopt/
+
 # OS
 .DS_Store
 Thumbs.db
