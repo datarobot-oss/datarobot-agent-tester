@@ -39,6 +39,11 @@ edit to the skill below so that an agent following it scores higher on the faili
   This budget shrinks after every rejected edit and grows after every accepted edit; if the
   budget is small, propose a smaller / more surgical edit (a single line, a single phrase).
 
+# Cooldown locators (DO NOT propose any edit whose `locator` matches or overlaps these — they
+# have been rejected too many times recently and are auto-rejected if you target them again).
+# Pick a DIFFERENT section of the skill to edit.
+{cooldown_block}
+
 # Output format
 Respond with ONLY a fenced JSON block:
 ```json
@@ -89,12 +94,18 @@ def propose_edit(
     model: str,
     config: Config,
     lr_chars: int,
+    cooldown_locators: list[str] | None = None,
 ) -> Edit:
+    cooldown = cooldown_locators or []
+    cooldown_block = (
+        "\n".join(f"- {loc!r}" for loc in cooldown) if cooldown else "(none)"
+    )
     prompt = _OPT_PROMPT.format(
         skill=skill,
         failures_block=_format_failures(failures),
         rejected_block=_format_rejected(rejected),
         lr_chars=lr_chars,
+        cooldown_block=cooldown_block,
     )
     raw = call_llm(prompt, model, config)
     m = re.search(r"```json\s*(\{.*?\})\s*```", raw, re.DOTALL)

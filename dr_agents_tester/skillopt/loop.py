@@ -45,6 +45,11 @@ class LoopConfig:
     lr_chars_ceiling: int = 800
     lr_decay: float = 0.7
     lr_growth: float = 1.3
+    # Locator cooldown: after a locator has been rejected this many times within
+    # the rolling window, refuse further edits on it (count as auto-rejected).
+    # This is the diversity stabilizer that the LR budget cannot provide alone.
+    locator_reject_threshold: int = 2
+    locator_cooldown_window: int = 5
 
 
 def _split_rows(
@@ -182,12 +187,29 @@ class SkillOptLoop:
         iters_log: list[IterResult] = []
         current_val_mean = baseline_val_mean
         lr_chars = self.cfg.lr_chars_initial
+        # Locator cooldown: track rejects per locator within a sliding window
+        # of iter numbers. A locator is "on cooldown" if its reject count in the
+        # last `locator_cooldown_window` iters is >= `locator_reject_threshold`.
+        locator_reject_iters: dict[str, list[int]] = {}
+
+        def _cooldown_set(current_iter: int) -> set[str]:
+            window_start = current_iter - self.cfg.locator_cooldown_window
+            return {
+                loc
+                for loc, iters in locator_reject_iters.items()
+                if sum(1 for i in iters if i >= window_start)
+                >= self.cfg.locator_reject_threshold
+            }
 
         for it in range(1, self.cfg.iters + 1):
             print(
                 f"\n[skillopt] === iter {it}/{self.cfg.iters} "
                 f"(lr_budget={lr_chars} chars) ==="
             )
+            cooldown = _cooldown_set(it)
+            if cooldown:
+                print(f"[skillopt] cooldown locators: {sorted(cooldown)}")
+
             # Build failure context: pair (prompt, score) sorted worst-first
             row_by_id = {r.id: r for r in train}
             failures = sorted(
@@ -202,6 +224,7 @@ class SkillOptLoop:
                     model=self.cfg.optimizer_model or self.config.model,
                     config=self.config,
                     lr_chars=lr_chars,
+                    cooldown_locators=sorted(cooldown),
                 )
             except Exception as e:
                 print(f"[skillopt] optimizer error: {e}; skipping iter")
@@ -212,6 +235,30 @@ class SkillOptLoop:
                 f"new_text_chars={len(edit.new_text)} "
                 f"rationale={edit.rationale[:100]!r}"
             )
+
+            # Enforce cooldown server-side: if optimizer ignored the ban, auto-reject
+            # without scoring (saves a val pass).
+            if any(loc in edit.locator or edit.locator in loc for loc in cooldown):
+                print(f"[skillopt] auto-REJECT iter {it}: locator on cooldown")
+                rejected.append(edit)
+                locator_reject_iters.setdefault(edit.locator, []).append(it)
+                lr_chars = max(
+                    self.cfg.lr_chars_floor, int(lr_chars * self.cfg.lr_decay)
+                )
+                ir = IterResult(
+                    it,
+                    edit,
+                    False,
+                    current_val_mean,
+                    current_val_mean,
+                    "locator on cooldown",
+                    lr_budget_chars=lr_chars,
+                    edit_size_chars=len(edit.new_text),
+                )
+                iters_log.append(ir)
+                self.reporter.write_iter(it, current, current, edit, [], ir)
+                continue
+
             new_skill, err = apply_edit(current, edit)
             if err:
                 print(f"[skillopt] apply_edit failed: {err}; treating as rejected")
@@ -278,6 +325,7 @@ class SkillOptLoop:
                     f"{new_val_mean:.3f}  (lr_budget -> {lr_chars})"
                 )
                 rejected.append(edit)
+                locator_reject_iters.setdefault(edit.locator, []).append(it)
 
         # Final test scoring
         print("\n[skillopt] scoring final on test set...")
