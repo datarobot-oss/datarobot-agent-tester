@@ -112,7 +112,12 @@ except Exception:
     pandas_mod.read_json = _make_recorder("pandas.read_json")
     sys.modules["pandas"] = pandas_mod
 
-# Run user code
+# Run user code inside a throwaway temp dir so any real file writes
+# (e.g. pandas .to_csv on a non-stubbed pandas) can't escape into the repo.
+import os, tempfile
+_sandbox_cwd = tempfile.mkdtemp(prefix="skillopt-sbx-")
+os.chdir(_sandbox_cwd)
+
 USER_CODE = __USER_CODE__
 
 err_repr = None
