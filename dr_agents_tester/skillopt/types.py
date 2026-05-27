@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
-
 
 RowType = Literal["code", "rubric"]
 EditOp = Literal["add", "delete", "replace"]

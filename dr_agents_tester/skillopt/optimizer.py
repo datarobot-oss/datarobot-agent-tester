@@ -10,12 +10,10 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
 
 from ..config import Config
 from ..llm import call_llm
 from .types import Edit, RowScore
-
 
 _OPT_PROMPT = """\
 You are SkillOpt, a text-space optimizer for AI agent skills. Analyze the failing rollouts
@@ -102,8 +100,7 @@ def _format_rejected(rejected: list[Edit]) -> str:
     if not rejected:
         return "(none yet)"
     return "\n".join(
-        f"- [{e.op}] locator={e.locator[:80]!r} new={e.new_text[:100]!r}"
-        for e in rejected[-10:]
+        f"- [{e.op}] locator={e.locator[:80]!r} new={e.new_text[:100]!r}" for e in rejected[-10:]
     )
 
 

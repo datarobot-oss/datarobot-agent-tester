@@ -22,9 +22,7 @@ class Reporter:
         d = self.run_dir / "baseline"
         d.mkdir(exist_ok=True)
         (d / "skill.md").write_text(skill)
-        (d / "val_scores.json").write_text(
-            json.dumps([s.to_dict() for s in val_scores], indent=2)
-        )
+        (d / "val_scores.json").write_text(json.dumps([s.to_dict() for s in val_scores], indent=2))
         (d / "test_scores.json").write_text(
             json.dumps([s.to_dict() for s in test_scores], indent=2)
         )
@@ -49,9 +47,7 @@ class Reporter:
         d = self.run_dir / f"iter-{iter_num:03d}"
         d.mkdir(exist_ok=True)
         (d / "skill.md").write_text(new_skill)
-        (d / "edits.json").write_text(
-            json.dumps([e.to_dict() for e in edits], indent=2)
-        )
+        (d / "edits.json").write_text(json.dumps([e.to_dict() for e in edits], indent=2))
         (d / "status.json").write_text(json.dumps(ir.to_dict(), indent=2))
         if val_scores:
             (d / "val_scores.json").write_text(
@@ -60,13 +56,14 @@ class Reporter:
         diff = difflib.unified_diff(
             old_skill.splitlines(keepends=True),
             new_skill.splitlines(keepends=True),
-            fromfile=f"iter-{iter_num-1:03d}/skill.md",
+            fromfile=f"iter-{iter_num - 1:03d}/skill.md",
             tofile=f"iter-{iter_num:03d}/skill.md",
         )
         (d / "diff.patch").write_text("".join(diff))
-        edit_lines = "\n".join(
-            f"- **[{e.op}]** `{e.locator}` — {e.rationale}" for e in edits
-        ) or "_(no edits applied)_"
+        edit_lines = (
+            "\n".join(f"- **[{e.op}]** `{e.locator}` — {e.rationale}" for e in edits)
+            or "_(no edits applied)_"
+        )
         (d / "rationale.md").write_text(
             f"# Iter {iter_num} — {'ACCEPTED' if ir.accepted else 'REJECTED'}\n\n"
             f"**L_t budget:** {ir.lt_budget} edits  \n"
@@ -111,7 +108,9 @@ def _summary_md(summary: dict) -> str:
         delta = ir["val_score_after"] - ir["val_score_before"]
         status = "✓ accept" if ir["accepted"] else "✗ reject"
         edits = ir.get("edits", [])
-        rat = ((edits[0]["rationale"] if edits else ir.get("reason", "")) or "")[:70].replace("|", "\\|")
+        rat = ((edits[0]["rationale"] if edits else ir.get("reason", "")) or "")[:70].replace(
+            "|", "\\|"
+        )
         lines.append(
             f"| {ir['iter_num']} | {ir.get('lt_budget', 0)} | {ir.get('num_applied', 0)} | "
             f"{ir['val_score_before']:.3f} | {ir['val_score_after']:.3f} | "
@@ -147,32 +146,35 @@ def _html_report(summary: dict, run_dir: Path) -> str:
         delta = ir["val_score_after"] - ir["val_score_before"]
         edits = ir.get("edits", [])
         top_rat = edits[0]["rationale"] if edits else (ir.get("reason") or "")
-        edits_html = "".join(
-            f"<li><code>{html.escape(e['op'])}</code> "
-            f"<b>{html.escape(e['locator'][:120])}</b> — {html.escape(e['rationale'][:200])}</li>"
-            for e in edits
-        ) or "<li><i>no edits applied</i></li>"
+        edits_html = (
+            "".join(
+                f"<li><code>{html.escape(e['op'])}</code> "
+                f"<b>{html.escape(e['locator'][:120])}</b> — {html.escape(e['rationale'][:200])}</li>"
+                for e in edits
+            )
+            or "<li><i>no edits applied</i></li>"
+        )
         cache_tag = ' <span style="color:#888">[cache hit]</span>' if ir.get("cache_hit") else ""
         rows_html.append(
             f"""
         <details style="margin-bottom:8px; border:1px solid #ddd; border-radius:6px; padding:8px">
           <summary>
             <b>iter {n}</b> &nbsp; {accept_badge} &nbsp;
-            <span style="color:#888">L_t={ir.get('lt_budget', 0)}, applied {ir.get('num_applied', 0)}/{ir.get('num_candidates', 0)}</span> &nbsp;
-            val {ir['val_score_before']:.3f} → {ir['val_score_after']:.3f}
+            <span style="color:#888">L_t={ir.get("lt_budget", 0)}, applied {ir.get("num_applied", 0)}/{ir.get("num_candidates", 0)}</span> &nbsp;
+            val {ir["val_score_before"]:.3f} → {ir["val_score_after"]:.3f}
             ({delta:+.3f}){cache_tag} &nbsp;
             <i>{html.escape(top_rat[:120])}</i>
           </summary>
           <p><b>Edits applied this step:</b></p>
           <ul>{edits_html}</ul>
-          <p><b>Reason:</b> {html.escape(ir['reason'] or '(accepted)')}</p>
+          <p><b>Reason:</b> {html.escape(ir["reason"] or "(accepted)")}</p>
           <pre style="background:#f6f8fa;padding:8px;overflow:auto;max-height:400px">{html.escape(diff_text)}</pre>
         </details>
         """
         )
 
     return f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>SkillOpt — {html.escape(Path(summary['skill_path']).name)}</title>
+<html><head><meta charset="utf-8"><title>SkillOpt — {html.escape(Path(summary["skill_path"]).name)}</title>
 <style>
   body {{ font-family: -apple-system, system-ui, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 16px; color: #222; }}
   h1, h2 {{ border-bottom: 1px solid #eee; padding-bottom: 4px; }}
@@ -180,19 +182,19 @@ def _html_report(summary: dict, run_dir: Path) -> str:
   .kpi b {{ font-size: 1.6em; display:block }}
   code {{ background:#f6f8fa; padding:2px 4px; border-radius:3px }}
 </style></head><body>
-<h1>SkillOpt — {html.escape(Path(summary['skill_path']).name)}</h1>
+<h1>SkillOpt — {html.escape(Path(summary["skill_path"]).name)}</h1>
 <p>
-  <span class="kpi">baseline test<br><b>{summary['baseline_test']:.3f}</b></span>
-  <span class="kpi">final test<br><b>{summary['final_test']:.3f}</b></span>
-  <span class="kpi">Δ test<br><b>{summary['final_test'] - summary['baseline_test']:+.3f}</b></span>
-  <span class="kpi">accepted / total<br><b>{summary['accepted_edits']} / {summary['iters']}</b></span>
+  <span class="kpi">baseline test<br><b>{summary["baseline_test"]:.3f}</b></span>
+  <span class="kpi">final test<br><b>{summary["final_test"]:.3f}</b></span>
+  <span class="kpi">Δ test<br><b>{summary["final_test"] - summary["baseline_test"]:+.3f}</b></span>
+  <span class="kpi">accepted / total<br><b>{summary["accepted_edits"]} / {summary["iters"]}</b></span>
 </p>
 <h2>Validation score over iterations</h2>
 {svg}
 <p><small>Blue dots = score after applying that iter's proposed edit (whether accepted or not).
 Green line = current accepted-skill score (only steps up on accept).</small></p>
 <h2>Iterations</h2>
-{''.join(rows_html)}
+{"".join(rows_html)}
 </body></html>"""
 
 
@@ -226,8 +228,7 @@ def _svg_chart(xs: list[int], ys: list[float], cur_ys: list[float]) -> str:
     line_pts = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in zip(xs, ys))
     cur_pts = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in zip(xs, cur_ys))
     dots = "".join(
-        f'<circle cx="{sx(x):.1f}" cy="{sy(y):.1f}" r="4" fill="#1f6feb"/>'
-        for x, y in zip(xs, ys)
+        f'<circle cx="{sx(x):.1f}" cy="{sy(y):.1f}" r="4" fill="#1f6feb"/>' for x, y in zip(xs, ys)
     )
     # Horizontal gridlines + y labels at 5 evenly spaced ticks across the
     # fitted range, so the reader can read off the magnitude of the moves.
@@ -237,26 +238,26 @@ def _svg_chart(xs: list[int], ys: list[float], cur_ys: list[float]) -> str:
         yval = ymin + (ymax - ymin) * i / (n_ticks - 1)
         yy = sy(yval)
         gridlines.append(
-            f'<line x1="{P}" y1="{yy:.1f}" x2="{W-P}" y2="{yy:.1f}" '
+            f'<line x1="{P}" y1="{yy:.1f}" x2="{W - P}" y2="{yy:.1f}" '
             f'stroke="#eee" stroke-width="1"/>'
-            f'<text x="{P-6}" y="{yy+4:.1f}" font-size="11" fill="#666" '
+            f'<text x="{P - 6}" y="{yy + 4:.1f}" font-size="11" fill="#666" '
             f'text-anchor="end">{yval:.3f}</text>'
         )
     # Dashed baseline reference at the first current-skill value.
     base_y = sy(cur_ys[0])
     baseline_ref = (
-        f'<line x1="{P}" y1="{base_y:.1f}" x2="{W-P}" y2="{base_y:.1f}" '
+        f'<line x1="{P}" y1="{base_y:.1f}" x2="{W - P}" y2="{base_y:.1f}" '
         f'stroke="#bbb" stroke-width="1" stroke-dasharray="2,3"/>'
-        f'<text x="{W-P}" y="{base_y-5:.1f}" font-size="10" fill="#999" '
+        f'<text x="{W - P}" y="{base_y - 5:.1f}" font-size="10" fill="#999" '
         f'text-anchor="end">baseline {cur_ys[0]:.3f}</text>'
     )
     axis = (
         "".join(gridlines)
         + baseline_ref
-        + f'<line x1="{P}" y1="{H-P}" x2="{W-P}" y2="{H-P}" stroke="#888"/>'
-        + f'<line x1="{P}" y1="{P}" x2="{P}" y2="{H-P}" stroke="#888"/>'
-        + f'<text x="{P}" y="{H-P+18}" font-size="11" fill="#666">iter {xmin}</text>'
-        + f'<text x="{W-P}" y="{H-P+18}" font-size="11" fill="#666" text-anchor="end">iter {xmax}</text>'
+        + f'<line x1="{P}" y1="{H - P}" x2="{W - P}" y2="{H - P}" stroke="#888"/>'
+        + f'<line x1="{P}" y1="{P}" x2="{P}" y2="{H - P}" stroke="#888"/>'
+        + f'<text x="{P}" y="{H - P + 18}" font-size="11" fill="#666">iter {xmin}</text>'
+        + f'<text x="{W - P}" y="{H - P + 18}" font-size="11" fill="#666" text-anchor="end">iter {xmax}</text>'
     )
     return (
         f'<svg viewBox="0 0 {W} {H}" width="100%" height="{H}">'

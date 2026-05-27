@@ -18,99 +18,101 @@ from ..config import Config
 from ..llm import call_llm
 from .types import EvalRow
 
-
 _GEN_PROMPT = """\
-You are generating an evaluation set for an AI coding skill. The skill below tells
-agents how to do a specific kind of DataRobot task. Your job: produce N evaluation rows
-that test whether an agent following this skill produces correct results.
+You are generating an evaluation set for an arbitrary AI coding/agent skill. A "skill" is a
+markdown instruction file that tells an agent how to perform some recurring task. Your job:
+read the skill, INFER what it teaches, and produce evaluation rows that test whether an agent
+following this skill produces correct results.
 
 # The skill under test
 <skill>
 {skill}
 </skill>
 
-# Supplemental DataRobot docs context
+# Supplemental reference context (may be empty)
 <docs>
 {docs}
 </docs>
 
-# Row schema (JSON, one per line)
+# Step 1 — analyze the skill (think, but don't output this)
+Identify, from the skill text only:
+- The concrete operations / APIs / functions / CLI commands it teaches (names, key arguments).
+- The decisions/recommendations it expects an agent to make (when to use X vs Y, defaults,
+  required preconditions, common errors it warns about).
+- Any helper scripts / CLI entrypoints it references and their important flags.
 
-CODE row — agent must emit runnable Python:
+# Step 2 — generate rows from THAT analysis
+
+Two row types:
+
+CODE row — the task should make the agent emit runnable code. Score is by executing the code
+in a sandbox (every imported module is auto-mocked, so calls are recorded but nothing real
+runs) and checking it called the right API with the right arguments:
 {{
   "id": "code-001",
   "type": "code",
-  "prompt": "<user-facing task that should produce a Python script>",
+  "prompt": "<realistic user task that should produce a code script>",
   "expected": {{
     "must_not_error": true,
-    "must_import": ["datarobot"],                    // optional
+    "must_import": ["<top-level module the skill tells them to import>"],   // optional
     "calls": [
       {{
-        "target": "datarobot_predict.deployment.predict",
-        "kwargs_required": ["deployment", "max_explanations"],
-        "kwargs_values": {{"max_explanations": "3", "explanation_algorithm": "shap"}}
+        "target": "<dotted.path.to.function_or_method the skill teaches>",
+        "kwargs_required": ["<kwargs the skill shows for this call>"],      // optional
+        "kwargs_values": {{"<kwarg>": "<expected value substring>"}}        // optional
       }}
     ]
   }},
-  "source": "section: Prediction Explanations",
-  "tags": ["shap", "explanations"]
+  "source": "<which skill section this came from>",
+  "tags": ["<topic>"]
 }}
 
-CODE row (CLI variant):
+CODE row (CLI variant) — when the skill references a CLI/script entrypoint:
 {{
   "id": "code-cli-001",
   "type": "code",
-  "prompt": "<task that should produce a bash CLI command using scripts/make_prediction.py>",
-  "expected": {{
-    "cli_contains": ["scripts/make_prediction.py", "--max-explanations", "3"]
-  }},
-  "source": "section: CLI shortcut"
+  "prompt": "<task that should produce a shell command using the skill's script>",
+  "expected": {{ "cli_contains": ["<script path or command>", "<required flag>", "<value>"] }},
+  "source": "<section>"
 }}
 
-RUBRIC row — agent must explain or recommend:
+RUBRIC row — the task is conceptual; the agent must explain/recommend. Scored by an LLM judge
+against pass/fail criteria:
 {{
   "id": "rubric-001",
   "type": "rubric",
-  "prompt": "<conceptual question or recommendation request>",
+  "prompt": "<conceptual question or recommendation request the skill should answer>",
   "expected": {{
     "criteria": [
-      "answer mentions that SHAP requires deployment-time enablement",
-      "answer recommends XEMP if SHAP is not enabled",
-      "answer does NOT confuse deployment explanations with project-level PredictionExplanations"
+      "<specific, checkable claim the answer must make, grounded in the skill>",
+      "<a thing the answer must NOT get wrong>"
     ],
-    "source_context": "<short verbatim snippet from the skill or docs that the answer must agree with>"
+    "source_context": "<short verbatim snippet from the skill the answer must agree with>"
   }},
-  "source": "section: Common errors",
-  "tags": ["shap", "xemp"]
+  "source": "<section>",
+  "tags": ["<topic>"]
 }}
 
 # Coverage requirements
 
-Generate exactly {n} rows covering this matrix (try to balance):
-- Real-time / single-row prediction (no explanations)
-- Batch prediction from CSV / DataFrame
-- Prediction explanations — SHAP request
-- Prediction explanations — XEMP request
-- Prediction explanations — threshold_high / threshold_low filtering
-- Prediction explanations — passthrough_columns
-- Prediction explanations — max_ngram_explanations (text models)
-- Generating prediction-data templates
-- Validating prediction data before scoring
-- Common errors: "Prediction explanations not enabled", missing columns, wrong API
-- When to use this skill vs datarobot-model-explainability (deployment vs project)
-- CLI usage of scripts/make_prediction.py with various flag combinations
-- Deployment.get_features / understanding deployment shape
-- Edge cases: empty input, single-row JSON vs list-of-rows JSON
+Generate exactly {n} rows. DERIVE the coverage from the skill you analyzed in Step 1 — there is
+NO fixed topic list. Aim to cover, in rough proportion to how much the skill emphasizes them:
+- Each distinct operation / API / CLI the skill teaches (the "happy path" for each).
+- Important argument/flag combinations and non-default options the skill documents.
+- The decisions/recommendations and "when to use X vs Y" guidance (rubric rows).
+- Preconditions and common errors the skill explicitly warns about.
+- A few realistic edge cases implied by the skill.
 
 Mix roughly {code_pct}% CODE rows and {rubric_pct}% RUBRIC rows.
 
-Make tasks realistic — phrased the way a DataRobot user would ask. Vary phrasing,
-length, and specificity. For CODE rows, ensure the expected `calls` fingerprint is
-something an agent following this skill should actually produce (look at the skill's
-"Common patterns" / examples to know what's idiomatic).
+CRITICAL — only test what THIS skill actually teaches:
+- Every `calls` target / `cli_contains` token must be an API, function, or flag the skill text
+  actually shows or clearly implies. Do NOT invent APIs.
+- Do NOT write expectations about the test harness, mock objects, undefined variables, or
+  "sample/placeholder data" — test real-world correct usage only.
+- Phrase prompts the way a real user of this skill's domain would ask. Vary phrasing and depth.
 
 # Output
-
 Output ONE JSON object per line (JSONL). No markdown fences, no commentary. Just JSONL.
 """
 

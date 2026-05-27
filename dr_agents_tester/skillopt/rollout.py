@@ -10,7 +10,6 @@ from ..config import Config
 from ..llm import call_llm
 from .types import EvalRow
 
-
 _ROLLOUT_PROMPT = """\
 You are an AI coding assistant working in a DataRobot context. You have been given the
 following skill document — treat it as your operating manual for this kind of task. Follow
@@ -46,7 +45,5 @@ def _output_hint(row: EvalRow) -> str:
 
 
 def rollout(skill: str, row: EvalRow, model: str, config: Config) -> str:
-    prompt = _ROLLOUT_PROMPT.format(
-        skill=skill, prompt=row.prompt, output_hint=_output_hint(row)
-    )
+    prompt = _ROLLOUT_PROMPT.format(skill=skill, prompt=row.prompt, output_hint=_output_hint(row))
     return call_llm(prompt, model, config)

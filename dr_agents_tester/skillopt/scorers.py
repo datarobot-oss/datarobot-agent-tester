@@ -11,7 +11,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -88,6 +87,12 @@ class _Mock:
     def __add__(self, o):
         return self
     __radd__ = __add__
+    def __mro_entries__(self, bases):
+        # Allow `class Foo(SomeMock)` — used by real modules that subclass a
+        # (mocked) optional dependency at import time. Contribute no real base.
+        return ()
+    def __class_getitem__(cls, item):
+        return cls
     def __repr__(self):
         return f"<mock {self.__name}>"
     # DataFrame-ish
@@ -138,6 +143,32 @@ except Exception:
     pandas_mod.read_csv = _make_recorder("pandas.read_csv")
     pandas_mod.read_json = _make_recorder("pandas.read_json")
     sys.modules["pandas"] = pandas_mod
+
+# GENERIC auto-mock: any module a skill imports that isn't actually installed is
+# served as a mock module whose attribute access returns recording mocks. This
+# makes the sandbox skill-agnostic — it works for ANY skill's dependencies, not
+# just DataRobot. Real installed modules (os, json, pandas, ...) still import
+# normally because this finder is appended LAST in sys.meta_path.
+import importlib.abc, importlib.machinery
+
+class _MockLoader(importlib.abc.Loader):
+    def create_module(self, spec):
+        m = types.ModuleType(spec.name)
+        m.__dict__["__skillopt_mock__"] = True
+        # PEP 562 module-level __getattr__: every attribute is a recording mock.
+        m.__dict__["__getattr__"] = lambda name, _p=spec.name: _Mock(f"{_p}.{name}")
+        m.__path__ = []  # mark as package so submodule imports also route here
+        return m
+    def exec_module(self, module):
+        pass
+
+class _MockFinder(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        # Only catch what nothing else could import. Returning a spec here means
+        # all real finders ahead of us already declined.
+        return importlib.machinery.ModuleSpec(fullname, _MockLoader())
+
+sys.meta_path.append(_MockFinder())
 
 # Run user code inside a throwaway temp dir so any real file writes
 # (e.g. pandas .to_csv on a non-stubbed pandas) can't escape into the repo.
@@ -434,7 +465,7 @@ class RubricScorer:
         if not criteria:
             return RowScore(row.id, 0.0, False, {"error": "no_criteria"}, agent_output)
 
-        criteria_block = "\n".join(f"{i+1}. {c}" for i, c in enumerate(criteria))
+        criteria_block = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(criteria))
         source = row.expected.get("source_context", row.source or "(none provided)")
         prompt = _RUBRIC_PROMPT.format(
             prompt=row.prompt,

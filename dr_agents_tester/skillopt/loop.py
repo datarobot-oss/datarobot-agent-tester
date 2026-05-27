@@ -7,7 +7,7 @@ import json
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import Config
@@ -158,8 +158,7 @@ class SkillOptLoop:
                 json.dumps([s.to_dict() for s in dropped], indent=2)
             )
             print(
-                f"[skillopt] kept {len(self.rows)}, dropped {len(dropped)} "
-                f"(see dropped_rows.json)"
+                f"[skillopt] kept {len(self.rows)}, dropped {len(dropped)} (see dropped_rows.json)"
             )
 
         train, val, test = _split_rows(self.rows, self.cfg)
@@ -192,9 +191,7 @@ class SkillOptLoop:
         baseline_val_mean = _mean(baseline_val)
         baseline_test_mean = _mean(baseline_test)
         self.reporter.write_baseline(current, baseline_val, baseline_test)
-        print(
-            f"[skillopt] baseline val={baseline_val_mean:.3f} test={baseline_test_mean:.3f}"
-        )
+        print(f"[skillopt] baseline val={baseline_val_mean:.3f} test={baseline_test_mean:.3f}")
 
         # Training rollouts (one pass — used to seed failing-row pool)
         print("[skillopt] scoring train rollouts (for failure pool)...")
@@ -216,8 +213,7 @@ class SkillOptLoop:
             return {
                 loc
                 for loc, iters in locator_reject_iters.items()
-                if sum(1 for i in iters if i >= window_start)
-                >= self.cfg.locator_reject_threshold
+                if sum(1 for i in iters if i >= window_start) >= self.cfg.locator_reject_threshold
             }
 
         def _score_val_cached(skill_text: str) -> tuple[float, list[RowScore], bool]:
@@ -245,9 +241,7 @@ class SkillOptLoop:
                 [(row_by_id[s.row_id].prompt, s) for s in train_scores if s.score < 1.0],
                 key=lambda ps: ps[1].score,
             )
-            successes = [
-                (row_by_id[s.row_id].prompt, s) for s in train_scores if s.score >= 1.0
-            ]
+            successes = [(row_by_id[s.row_id].prompt, s) for s in train_scores if s.score >= 1.0]
             try:
                 candidates = propose_edits(
                     skill=current,
@@ -290,9 +284,15 @@ class SkillOptLoop:
 
             if not selected:
                 ir = IterResult(
-                    it, [], False, current_val_mean, current_val_mean,
+                    it,
+                    [],
+                    False,
+                    current_val_mean,
+                    current_val_mean,
                     "no applicable candidates (all on cooldown or empty)",
-                    lt_budget=lt, num_candidates=len(candidates), num_applied=0,
+                    lt_budget=lt,
+                    num_candidates=len(candidates),
+                    num_applied=0,
                 )
                 iters_log.append(ir)
                 self.reporter.write_iter(it, current, current, [], [], ir)
@@ -307,9 +307,15 @@ class SkillOptLoop:
                     rejected.append(e)
                     locator_reject_iters.setdefault(e.locator, []).append(it)
                 ir = IterResult(
-                    it, selected, False, current_val_mean, current_val_mean,
+                    it,
+                    selected,
+                    False,
+                    current_val_mean,
+                    current_val_mean,
                     "no edits could be located/applied",
-                    lt_budget=lt, num_candidates=len(candidates), num_applied=0,
+                    lt_budget=lt,
+                    num_candidates=len(candidates),
+                    num_applied=0,
                 )
                 iters_log.append(ir)
                 self.reporter.write_iter(it, current, new_skill, selected, [], ir)
@@ -371,9 +377,7 @@ class SkillOptLoop:
             "iters_log": [ir.to_dict() for ir in iters_log],
         }
         if gaming_dropped:
-            (self.run_dir / "gaming_dropped.json").write_text(
-                json.dumps(gaming_dropped, indent=2)
-            )
+            (self.run_dir / "gaming_dropped.json").write_text(json.dumps(gaming_dropped, indent=2))
             print(
                 f"[skillopt] anti-gaming guard dropped {len(gaming_dropped)} candidate "
                 f"edits (see gaming_dropped.json)"
