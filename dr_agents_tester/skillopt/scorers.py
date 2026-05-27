@@ -51,11 +51,17 @@ def _make_recorder(qualname):
     return _rec
 
 class _Mock:
+    # Fully duck-typed stand-in. The point is that ANY reasonable real-usage
+    # access pattern (attribute, subscript, len, iteration, arithmetic) must
+    # "just work" — otherwise the skill learns to defensively code around the
+    # mock's quirks, which is reward-hacking the harness rather than improving.
     def __init__(self, name="mock"):
         self.__name = name
     def __getattr__(self, k):
+        if k.startswith("_Mock__"):
+            raise AttributeError(k)
         sub = _Mock(f"{self.__name}.{k}")
-        setattr(self, k, sub)
+        object.__setattr__(self, k, sub)
         return sub
     def __call__(self, *a, **kw):
         _calls.append({
@@ -64,16 +70,37 @@ class _Mock:
             "kwargs": {k: repr(v)[:200] for k, v in kw.items()},
         })
         return _Mock(self.__name + "()")
+    def __getitem__(self, k):
+        return _Mock(f"{self.__name}[{k!r}]")
+    def __setitem__(self, k, v):
+        pass
     def __iter__(self):
-        return iter([])
+        # Yield a couple of mock rows so len()/comprehensions/loops work.
+        return iter([_Mock(f"{self.__name}[0]"), _Mock(f"{self.__name}[1]")])
+    def __len__(self):
+        return 2
+    def __contains__(self, k):
+        return True
+    def __int__(self):
+        return 0
+    def __float__(self):
+        return 0.0
+    def __add__(self, o):
+        return self
+    __radd__ = __add__
     def __repr__(self):
         return f"<mock {self.__name}>"
     # DataFrame-ish
     @property
     def dataframe(self):
         return _Mock(self.__name + ".dataframe")
+    @property
+    def columns(self):
+        return _Mock(self.__name + ".columns")
     def to_dict(self, *a, **kw):
         return {}
+    def head(self, *a, **kw):
+        return self
 
 def _install(mod_name, attrs=None):
     m = types.ModuleType(mod_name)
@@ -114,19 +141,43 @@ except Exception:
 
 # Run user code inside a throwaway temp dir so any real file writes
 # (e.g. pandas .to_csv on a non-stubbed pandas) can't escape into the repo.
-import os, tempfile
+import os, re as _re, tempfile
 _sandbox_cwd = tempfile.mkdtemp(prefix="skillopt-sbx-")
 os.chdir(_sandbox_cwd)
 
 USER_CODE = __USER_CODE__
 
+# Pre-seed commonly-referenced variable names so code that uses a DataFrame the
+# prompt says is "already in scope" doesn't NameError. Any OTHER undefined name
+# is bound to a mock on-demand via the NameError-retry loop below — so the
+# scorer never penalizes "use the variable that's already defined", and the
+# skill has no incentive to fabricate placeholder data.
+_ns = {"__name__": "__main__"}
+for _v in ("df", "data", "data_frame", "dataframe", "input_df", "prediction_data",
+           "customer_df", "test_data", "batch_df", "scoring_data", "X", "X_test",
+           "features_df", "new_data", "sample_data"):
+    _ns[_v] = _Mock(_v)
+
 err_repr = None
-try:
-    exec(USER_CODE, {"__name__": "__main__"})
-except SystemExit:
-    pass
-except Exception as e:
-    err_repr = f"{type(e).__name__}: {e}"
+for _attempt in range(25):
+    _calls.clear()
+    try:
+        exec(USER_CODE, _ns)
+        err_repr = None
+        break
+    except SystemExit:
+        err_repr = None
+        break
+    except NameError as e:
+        m = _re.search(r"name '(\w+)' is not defined", str(e))
+        if m and m.group(1) not in _ns:
+            _ns[m.group(1)] = _Mock(m.group(1))
+            continue  # retry whole script with the name now bound
+        err_repr = f"{type(e).__name__}: {e}"
+        break
+    except Exception as e:
+        err_repr = f"{type(e).__name__}: {e}"
+        break
 
 print("\n__SKILLOPT_CALLS__")
 print(json.dumps({"calls": _calls, "error": err_repr}))

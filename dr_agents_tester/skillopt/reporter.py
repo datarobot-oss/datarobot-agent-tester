@@ -199,12 +199,23 @@ Green line = current accepted-skill score (only steps up on accept).</small></p>
 def _svg_chart(xs: list[int], ys: list[float], cur_ys: list[float]) -> str:
     if not xs:
         return ""
-    W, H, P = 800, 260, 36
+    W, H, P = 800, 300, 48
     xmin, xmax = min(xs), max(xs) or 1
-    ymin = min(min(ys), min(cur_ys), 0.0)
-    ymax = max(max(ys), max(cur_ys), 1.0)
-    if ymax == ymin:
-        ymax = ymin + 1
+
+    # Auto-fit the y-axis to the actual data range (NOT 0..1) so small
+    # iteration-to-iteration changes are visible. Pad by 8% of the data span
+    # on each side; enforce a minimum visible window so a near-flat run still
+    # renders with breathing room rather than a zero-height band.
+    all_y = ys + cur_ys
+    dmin, dmax = min(all_y), max(all_y)
+    span = dmax - dmin
+    min_window = 0.05  # always show at least a 5-pt window
+    if span < min_window:
+        mid = (dmin + dmax) / 2
+        dmin, dmax = mid - min_window / 2, mid + min_window / 2
+        span = dmax - dmin
+    pad = span * 0.08
+    ymin, ymax = dmin - pad, dmax + pad
 
     def sx(x: float) -> float:
         return P + (x - xmin) / (xmax - xmin) * (W - 2 * P)
@@ -218,13 +229,34 @@ def _svg_chart(xs: list[int], ys: list[float], cur_ys: list[float]) -> str:
         f'<circle cx="{sx(x):.1f}" cy="{sy(y):.1f}" r="4" fill="#1f6feb"/>'
         for x, y in zip(xs, ys)
     )
+    # Horizontal gridlines + y labels at 5 evenly spaced ticks across the
+    # fitted range, so the reader can read off the magnitude of the moves.
+    gridlines = []
+    n_ticks = 5
+    for i in range(n_ticks):
+        yval = ymin + (ymax - ymin) * i / (n_ticks - 1)
+        yy = sy(yval)
+        gridlines.append(
+            f'<line x1="{P}" y1="{yy:.1f}" x2="{W-P}" y2="{yy:.1f}" '
+            f'stroke="#eee" stroke-width="1"/>'
+            f'<text x="{P-6}" y="{yy+4:.1f}" font-size="11" fill="#666" '
+            f'text-anchor="end">{yval:.3f}</text>'
+        )
+    # Dashed baseline reference at the first current-skill value.
+    base_y = sy(cur_ys[0])
+    baseline_ref = (
+        f'<line x1="{P}" y1="{base_y:.1f}" x2="{W-P}" y2="{base_y:.1f}" '
+        f'stroke="#bbb" stroke-width="1" stroke-dasharray="2,3"/>'
+        f'<text x="{W-P}" y="{base_y-5:.1f}" font-size="10" fill="#999" '
+        f'text-anchor="end">baseline {cur_ys[0]:.3f}</text>'
+    )
     axis = (
-        f'<line x1="{P}" y1="{H-P}" x2="{W-P}" y2="{H-P}" stroke="#888"/>'
-        f'<line x1="{P}" y1="{P}" x2="{P}" y2="{H-P}" stroke="#888"/>'
-        f'<text x="{P}" y="{H-P+18}" font-size="11" fill="#666">iter {xmin}</text>'
-        f'<text x="{W-P}" y="{H-P+18}" font-size="11" fill="#666" text-anchor="end">iter {xmax}</text>'
-        f'<text x="{P-6}" y="{P}" font-size="11" fill="#666" text-anchor="end">{ymax:.2f}</text>'
-        f'<text x="{P-6}" y="{H-P}" font-size="11" fill="#666" text-anchor="end">{ymin:.2f}</text>'
+        "".join(gridlines)
+        + baseline_ref
+        + f'<line x1="{P}" y1="{H-P}" x2="{W-P}" y2="{H-P}" stroke="#888"/>'
+        + f'<line x1="{P}" y1="{P}" x2="{P}" y2="{H-P}" stroke="#888"/>'
+        + f'<text x="{P}" y="{H-P+18}" font-size="11" fill="#666">iter {xmin}</text>'
+        + f'<text x="{W-P}" y="{H-P+18}" font-size="11" fill="#666" text-anchor="end">iter {xmax}</text>'
     )
     return (
         f'<svg viewBox="0 0 {W} {H}" width="100%" height="{H}">'

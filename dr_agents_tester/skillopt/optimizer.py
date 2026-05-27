@@ -50,6 +50,12 @@ most likely to fix the most failures first.
 - Do not invent DataRobot APIs or flags — stick to what the skill shows or the failures imply.
 - Edits should target DIFFERENT parts of the skill where possible (diversity beats piling onto
   one section).
+- **Optimize the skill for REAL DataRobot usage, never for the test harness.** Do NOT write
+  guidance that references the evaluation/sandbox, mock objects, `NameError`, creating
+  placeholder/sample/fake DataFrames "for testing", code truncation, or "converting to list to
+  avoid iteration issues". Such edits game the scorer and will be rejected. If a failure looks
+  like a harness artifact (undefined variable, mock type quirk), IGNORE it — fix only genuine
+  guidance gaps a real DataRobot user would hit.
 
 # Output format
 Respond with ONLY a fenced JSON array of edit objects, ranked best-first:
@@ -164,6 +170,31 @@ def _parse_edits(raw: str) -> list[Edit]:
             )
         )
     return edits
+
+
+# Patterns that indicate an edit is gaming the eval harness rather than
+# improving real-usage guidance. Matched case-insensitively against new_text.
+_GAMING_PATTERNS = [
+    r"\bmock\b",
+    r"name\s*error",
+    r"\bnot\s+defined\b",
+    r"placeholder\s+(data|dataframe)",
+    r"sample\s+(data|dataframe)\b.*\b(test|valid|avoid|placeholder)",
+    r"for\s+testing(/|\s+and\s+)?valid",
+    r"testing[/ ]validation\s+purposes",
+    r"execution\s+environment",
+    r"if\s+the\s+variable\s+is\s+not\s+(available|defined|in\s+scope)",
+    r"avoid\s+(iteration|truncation)",
+    r"truncat",
+    r"generator\s+object",
+]
+_GAMING_RE = re.compile("|".join(_GAMING_PATTERNS), re.IGNORECASE)
+
+
+def gaming_reason(edit: Edit) -> str | None:
+    """Return the matched gaming phrase if the edit looks like scorer-hacking, else None."""
+    m = _GAMING_RE.search(edit.new_text)
+    return m.group(0) if m else None
 
 
 def apply_edit(skill: str, edit: Edit) -> tuple[str, str]:

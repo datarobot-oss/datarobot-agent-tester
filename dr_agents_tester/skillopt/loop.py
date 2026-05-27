@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..config import Config
-from .optimizer import apply_edits, propose_edits
+from .optimizer import apply_edits, gaming_reason, propose_edits
 from .reporter import Reporter
 from .rollout import rollout
 from .scorers import Scorer
@@ -203,6 +203,7 @@ class SkillOptLoop:
 
         rejected: list[Edit] = []
         iters_log: list[IterResult] = []
+        gaming_dropped: list[dict] = []  # edits filtered by the anti-gaming guard
         current_val_mean = baseline_val_mean
         # Score hash-cache: skill-text hash -> val mean. Avoids re-scoring a
         # candidate skill we've already evaluated (paper's caching step).
@@ -264,12 +265,22 @@ class SkillOptLoop:
                 print(f"[skillopt] optimizer error: {e}; skipping iter")
                 continue
 
-            # Drop candidates targeting cooldown locators, then clip to top L_t.
+            # Drop candidates that game the harness, then those on cooldown
+            # locators, then clip to top L_t.
             def _on_cooldown(e: Edit) -> bool:
                 return any(loc in e.locator or e.locator in loc for loc in cooldown)
 
-            ranked = [c for c in candidates if not _on_cooldown(c)]
-            selected = ranked[:lt]
+            kept = []
+            for c in candidates:
+                gr = gaming_reason(c)
+                if gr:
+                    print(f"    drop (anti-gaming: {gr!r}) [{c.op}] {c.locator[:45]!r}")
+                    gaming_dropped.append({"iter": it, "reason": gr, "edit": c.to_dict()})
+                    continue
+                if _on_cooldown(c):
+                    continue
+                kept.append(c)
+            selected = kept[:lt]
             print(
                 f"[skillopt] optimizer proposed {len(candidates)} candidates; "
                 f"applying top {len(selected)} (L_t={lt})"
@@ -356,7 +367,16 @@ class SkillOptLoop:
             "final_test": final_test_mean,
             "accepted_edits": sum(1 for ir in iters_log if ir.accepted),
             "rejected_edits": sum(1 for ir in iters_log if not ir.accepted),
+            "gaming_dropped_count": len(gaming_dropped),
             "iters_log": [ir.to_dict() for ir in iters_log],
         }
+        if gaming_dropped:
+            (self.run_dir / "gaming_dropped.json").write_text(
+                json.dumps(gaming_dropped, indent=2)
+            )
+            print(
+                f"[skillopt] anti-gaming guard dropped {len(gaming_dropped)} candidate "
+                f"edits (see gaming_dropped.json)"
+            )
         self.reporter.write_final(current, final_test, summary)
         return summary
