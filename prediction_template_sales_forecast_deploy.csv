@@ -1,0 +1,3 @@
+# Prediction template for deployment: sales_forecast_deploy
+# Model: <mock datarobot.Deployment.get().model.get()>
+# Target: <mock datarobot.Deployment.get().model.get()>

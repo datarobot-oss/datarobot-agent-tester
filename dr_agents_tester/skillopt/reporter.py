@@ -42,14 +42,16 @@ class Reporter:
         iter_num: int,
         old_skill: str,
         new_skill: str,
-        edit: Edit,
+        edits: list[Edit],
         val_scores: list[RowScore],
         ir: IterResult,
     ) -> None:
         d = self.run_dir / f"iter-{iter_num:03d}"
         d.mkdir(exist_ok=True)
         (d / "skill.md").write_text(new_skill)
-        (d / "edit.json").write_text(json.dumps(edit.to_dict(), indent=2))
+        (d / "edits.json").write_text(
+            json.dumps([e.to_dict() for e in edits], indent=2)
+        )
         (d / "status.json").write_text(json.dumps(ir.to_dict(), indent=2))
         if val_scores:
             (d / "val_scores.json").write_text(
@@ -62,12 +64,17 @@ class Reporter:
             tofile=f"iter-{iter_num:03d}/skill.md",
         )
         (d / "diff.patch").write_text("".join(diff))
+        edit_lines = "\n".join(
+            f"- **[{e.op}]** `{e.locator}` — {e.rationale}" for e in edits
+        ) or "_(no edits applied)_"
         (d / "rationale.md").write_text(
             f"# Iter {iter_num} — {'ACCEPTED' if ir.accepted else 'REJECTED'}\n\n"
-            f"**Edit op:** `{edit.op}`  \n"
-            f"**Locator:** `{edit.locator}`  \n"
-            f"**Val score:** {ir.val_score_before:.3f} -> {ir.val_score_after:.3f}\n\n"
-            f"**Rationale (from optimizer):** {edit.rationale}\n\n"
+            f"**L_t budget:** {ir.lt_budget} edits  \n"
+            f"**Candidates proposed:** {ir.num_candidates}  \n"
+            f"**Edits applied:** {ir.num_applied}  \n"
+            f"**Val score:** {ir.val_score_before:.3f} -> {ir.val_score_after:.3f}"
+            f"{' (cache hit)' if ir.cache_hit else ''}\n\n"
+            f"**Edits:**\n{edit_lines}\n\n"
             f"**Why rejected:** {ir.reason or '(accepted)'}\n"
         )
 
@@ -97,18 +104,18 @@ def _summary_md(summary: dict) -> str:
         "",
         "## Iter log",
         "",
-        "| iter | op | val_before | val_after | Δ | status | lr | edit_chars | rationale |",
-        "|------|----|-----------:|----------:|----:|--------|---:|-----------:|-----------|",
+        "| iter | L_t | applied | val_before | val_after | Δ | status | top rationale |",
+        "|------|----:|--------:|-----------:|----------:|----:|--------|---------------|",
     ]
     for ir in summary["iters_log"]:
         delta = ir["val_score_after"] - ir["val_score_before"]
         status = "✓ accept" if ir["accepted"] else "✗ reject"
-        rat = (ir["edit"]["rationale"] or "")[:80].replace("|", "\\|")
+        edits = ir.get("edits", [])
+        rat = ((edits[0]["rationale"] if edits else ir.get("reason", "")) or "")[:70].replace("|", "\\|")
         lines.append(
-            f"| {ir['iter_num']} | {ir['edit']['op']} | "
+            f"| {ir['iter_num']} | {ir.get('lt_budget', 0)} | {ir.get('num_applied', 0)} | "
             f"{ir['val_score_before']:.3f} | {ir['val_score_after']:.3f} | "
-            f"{delta:+.3f} | {status} | "
-            f"{ir.get('lr_budget_chars', 0)} | {ir.get('edit_size_chars', 0)} | {rat} |"
+            f"{delta:+.3f} | {status} | {rat} |"
         )
     return "\n".join(lines) + "\n"
 
@@ -138,19 +145,26 @@ def _html_report(summary: dict, run_dir: Path) -> str:
             else '<span style="background:#a33;color:#fff;padding:2px 8px;border-radius:4px">REJECTED</span>'
         )
         delta = ir["val_score_after"] - ir["val_score_before"]
+        edits = ir.get("edits", [])
+        top_rat = edits[0]["rationale"] if edits else (ir.get("reason") or "")
+        edits_html = "".join(
+            f"<li><code>{html.escape(e['op'])}</code> "
+            f"<b>{html.escape(e['locator'][:120])}</b> — {html.escape(e['rationale'][:200])}</li>"
+            for e in edits
+        ) or "<li><i>no edits applied</i></li>"
+        cache_tag = ' <span style="color:#888">[cache hit]</span>' if ir.get("cache_hit") else ""
         rows_html.append(
             f"""
         <details style="margin-bottom:8px; border:1px solid #ddd; border-radius:6px; padding:8px">
           <summary>
             <b>iter {n}</b> &nbsp; {accept_badge} &nbsp;
-            <code>{html.escape(ir['edit']['op'])}</code> &nbsp;
+            <span style="color:#888">L_t={ir.get('lt_budget', 0)}, applied {ir.get('num_applied', 0)}/{ir.get('num_candidates', 0)}</span> &nbsp;
             val {ir['val_score_before']:.3f} → {ir['val_score_after']:.3f}
-            ({delta:+.3f}) &nbsp;
-            <span style="color:#888">lr={ir.get('lr_budget_chars', 0)}ch
-            (edit={ir.get('edit_size_chars', 0)}ch)</span> &nbsp;
-            <i>{html.escape(ir['edit']['rationale'][:120])}</i>
+            ({delta:+.3f}){cache_tag} &nbsp;
+            <i>{html.escape(top_rat[:120])}</i>
           </summary>
-          <p><b>Locator:</b> <code>{html.escape(ir['edit']['locator'][:200])}</code></p>
+          <p><b>Edits applied this step:</b></p>
+          <ul>{edits_html}</ul>
           <p><b>Reason:</b> {html.escape(ir['reason'] or '(accepted)')}</p>
           <pre style="background:#f6f8fa;padding:8px;overflow:auto;max-height:400px">{html.escape(diff_text)}</pre>
         </details>

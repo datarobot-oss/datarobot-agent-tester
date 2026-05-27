@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..config import Config
-from .optimizer import apply_edit, propose_edit
+from .optimizer import apply_edits, propose_edits
 from .reporter import Reporter
 from .rollout import rollout
 from .scorers import Scorer
@@ -34,22 +34,40 @@ class LoopConfig:
     # generator-mis-specified rows where the skill is correct but the expected
     # fingerprint is wrong. 0.0 disables the filter.
     drop_baseline_below: float = 0.0
-    # Textual learning-rate budget (per-iter char limit on `new_text`).
-    # Initial budget shrinks by `lr_decay` after every rejected edit and grows by
-    # `lr_growth` after every accepted edit, clamped to [floor, ceiling].
-    # This is the SkillOpt paper's primary stabilizer — when the optimizer gets
-    # stuck rejecting on the same locator, the shrinking budget forces a smaller,
-    # more surgical edit which usually breaks the rut.
-    lr_chars_initial: int = 400
-    lr_chars_floor: int = 80
-    lr_chars_ceiling: int = 800
-    lr_decay: float = 0.7
-    lr_growth: float = 1.3
+    # Textual learning-rate budget L_t (SkillOpt paper §method): the MAX NUMBER OF
+    # EDITS applied per optimization step. Decays on a schedule from lt_max to
+    # lt_floor over the run — bigger moves early, consolidation later. The
+    # optimizer proposes up to `n_candidates` ranked edits; the loop applies the
+    # top L_t. (Note: NOT a char limit — that was a pre-refactor mistake.)
+    lt_max: int = 4
+    lt_floor: int = 2
+    lt_schedule: str = "cosine"  # cosine | linear | constant
+    n_candidates: int = 8
+    # Secondary guardrail only (not the paper's LR mechanism): hard char cap on a
+    # single edit's new_text, to prevent pathological giant inserts.
+    max_edit_chars: int = 800
     # Locator cooldown: after a locator has been rejected this many times within
-    # the rolling window, refuse further edits on it (count as auto-rejected).
-    # This is the diversity stabilizer that the LR budget cannot provide alone.
+    # the rolling window, refuse further edits on it (auto-rejected). Diversity
+    # stabilizer layered on top of the edit-count budget.
     locator_reject_threshold: int = 2
     locator_cooldown_window: int = 5
+
+
+def _lt_at(step: int, total: int, cfg: "LoopConfig") -> int:
+    """Edit-count budget at a given 1-based step, per the chosen schedule."""
+    import math
+
+    if total <= 1:
+        return cfg.lt_max
+    frac = (step - 1) / (total - 1)  # 0.0 at first step, 1.0 at last
+    span = cfg.lt_max - cfg.lt_floor
+    if cfg.lt_schedule == "constant":
+        val = cfg.lt_max
+    elif cfg.lt_schedule == "linear":
+        val = cfg.lt_max - span * frac
+    else:  # cosine (default): smooth max -> floor
+        val = cfg.lt_floor + span * 0.5 * (1 + math.cos(math.pi * frac))
+    return max(cfg.lt_floor, min(cfg.lt_max, round(val)))
 
 
 def _split_rows(
@@ -186,10 +204,10 @@ class SkillOptLoop:
         rejected: list[Edit] = []
         iters_log: list[IterResult] = []
         current_val_mean = baseline_val_mean
-        lr_chars = self.cfg.lr_chars_initial
-        # Locator cooldown: track rejects per locator within a sliding window
-        # of iter numbers. A locator is "on cooldown" if its reject count in the
-        # last `locator_cooldown_window` iters is >= `locator_reject_threshold`.
+        # Score hash-cache: skill-text hash -> val mean. Avoids re-scoring a
+        # candidate skill we've already evaluated (paper's caching step).
+        val_cache: dict[str, tuple[float, list[RowScore]]] = {}
+        # Locator cooldown: track rejects per locator within a sliding window.
         locator_reject_iters: dict[str, list[int]] = {}
 
         def _cooldown_set(current_iter: int) -> set[str]:
@@ -201,131 +219,127 @@ class SkillOptLoop:
                 >= self.cfg.locator_reject_threshold
             }
 
+        def _score_val_cached(skill_text: str) -> tuple[float, list[RowScore], bool]:
+            h = hashlib.sha1(skill_text.encode()).hexdigest()
+            if h in val_cache:
+                mean, scores = val_cache[h]
+                return mean, scores, True
+            scores = _score_set(skill_text, val, self.scorer, self.cfg, self.config)
+            mean = _mean(scores)
+            val_cache[h] = (mean, scores)
+            return mean, scores, False
+
         for it in range(1, self.cfg.iters + 1):
+            lt = _lt_at(it, self.cfg.iters, self.cfg)
             print(
                 f"\n[skillopt] === iter {it}/{self.cfg.iters} "
-                f"(lr_budget={lr_chars} chars) ==="
+                f"(L_t={lt} edits, schedule={self.cfg.lt_schedule}) ==="
             )
             cooldown = _cooldown_set(it)
             if cooldown:
                 print(f"[skillopt] cooldown locators: {sorted(cooldown)}")
 
-            # Build failure context: pair (prompt, score) sorted worst-first
             row_by_id = {r.id: r for r in train}
             failures = sorted(
                 [(row_by_id[s.row_id].prompt, s) for s in train_scores if s.score < 1.0],
                 key=lambda ps: ps[1].score,
             )
+            successes = [
+                (row_by_id[s.row_id].prompt, s) for s in train_scores if s.score >= 1.0
+            ]
             try:
-                edit = propose_edit(
+                candidates = propose_edits(
                     skill=current,
                     failures=failures,
+                    successes=successes,
                     rejected=rejected[-self.cfg.max_rejected_in_context :],
                     model=self.cfg.optimizer_model or self.config.model,
                     config=self.config,
-                    lr_chars=lr_chars,
+                    lt=lt,
+                    n_candidates=self.cfg.n_candidates,
                     cooldown_locators=sorted(cooldown),
+                    max_edit_chars=self.cfg.max_edit_chars,
                 )
             except Exception as e:
                 print(f"[skillopt] optimizer error: {e}; skipping iter")
                 continue
 
+            # Drop candidates targeting cooldown locators, then clip to top L_t.
+            def _on_cooldown(e: Edit) -> bool:
+                return any(loc in e.locator or e.locator in loc for loc in cooldown)
+
+            ranked = [c for c in candidates if not _on_cooldown(c)]
+            selected = ranked[:lt]
             print(
-                f"[skillopt] proposed [{edit.op}] locator={edit.locator[:60]!r} "
-                f"new_text_chars={len(edit.new_text)} "
-                f"rationale={edit.rationale[:100]!r}"
+                f"[skillopt] optimizer proposed {len(candidates)} candidates; "
+                f"applying top {len(selected)} (L_t={lt})"
             )
+            for c in selected:
+                print(f"    [{c.op}] {c.locator[:55]!r} :: {c.rationale[:80]!r}")
 
-            # Enforce cooldown server-side: if optimizer ignored the ban, auto-reject
-            # without scoring (saves a val pass).
-            if any(loc in edit.locator or edit.locator in loc for loc in cooldown):
-                print(f"[skillopt] auto-REJECT iter {it}: locator on cooldown")
-                rejected.append(edit)
-                locator_reject_iters.setdefault(edit.locator, []).append(it)
-                lr_chars = max(
-                    self.cfg.lr_chars_floor, int(lr_chars * self.cfg.lr_decay)
-                )
+            if not selected:
                 ir = IterResult(
-                    it,
-                    edit,
-                    False,
-                    current_val_mean,
-                    current_val_mean,
-                    "locator on cooldown",
-                    lr_budget_chars=lr_chars,
-                    edit_size_chars=len(edit.new_text),
+                    it, [], False, current_val_mean, current_val_mean,
+                    "no applicable candidates (all on cooldown or empty)",
+                    lt_budget=lt, num_candidates=len(candidates), num_applied=0,
                 )
                 iters_log.append(ir)
-                self.reporter.write_iter(it, current, current, edit, [], ir)
+                self.reporter.write_iter(it, current, current, [], [], ir)
                 continue
 
-            new_skill, err = apply_edit(current, edit)
-            if err:
-                print(f"[skillopt] apply_edit failed: {err}; treating as rejected")
-                rejected.append(edit)
-                # Apply-failure counts as a reject for LR-budget purposes
-                lr_chars = max(
-                    self.cfg.lr_chars_floor, int(lr_chars * self.cfg.lr_decay)
-                )
+            new_skill, applied, failed = apply_edits(current, selected)
+            for e, reason in failed:
+                print(f"    skip [{e.op}] {e.locator[:40]!r}: {reason[:60]}")
+
+            if not applied:
+                for e in selected:
+                    rejected.append(e)
+                    locator_reject_iters.setdefault(e.locator, []).append(it)
                 ir = IterResult(
-                    it,
-                    edit,
-                    False,
-                    current_val_mean,
-                    current_val_mean,
-                    err,
-                    lr_budget_chars=lr_chars,
-                    edit_size_chars=len(edit.new_text),
+                    it, selected, False, current_val_mean, current_val_mean,
+                    "no edits could be located/applied",
+                    lt_budget=lt, num_candidates=len(candidates), num_applied=0,
                 )
                 iters_log.append(ir)
-                self.reporter.write_iter(it, current, new_skill, edit, [], ir)
+                self.reporter.write_iter(it, current, new_skill, selected, [], ir)
                 continue
 
-            # Re-score val
-            new_val_scores = _score_set(new_skill, val, self.scorer, self.cfg, self.config)
-            new_val_mean = _mean(new_val_scores)
+            new_val_mean, new_val_scores, cache_hit = _score_val_cached(new_skill)
             accepted = new_val_mean > current_val_mean + self.cfg.epsilon
-
-            # Update LR budget based on outcome
-            if accepted:
-                lr_chars = min(
-                    self.cfg.lr_chars_ceiling, int(lr_chars * self.cfg.lr_growth)
-                )
-            else:
-                lr_chars = max(
-                    self.cfg.lr_chars_floor, int(lr_chars * self.cfg.lr_decay)
-                )
 
             ir = IterResult(
                 iter_num=it,
-                edit=edit,
+                edits=applied,
                 accepted=accepted,
                 val_score_before=current_val_mean,
                 val_score_after=new_val_mean,
                 reason="" if accepted else "no strict val improvement",
-                lr_budget_chars=lr_chars,
-                edit_size_chars=len(edit.new_text),
+                lt_budget=lt,
+                num_candidates=len(candidates),
+                num_applied=len(applied),
+                cache_hit=cache_hit,
             )
             iters_log.append(ir)
-            self.reporter.write_iter(it, current, new_skill, edit, new_val_scores, ir)
+            self.reporter.write_iter(it, current, new_skill, applied, new_val_scores, ir)
 
+            cache_tag = " [cache hit]" if cache_hit else ""
             if accepted:
                 print(
                     f"[skillopt] ACCEPT iter {it}: val {current_val_mean:.3f} -> "
-                    f"{new_val_mean:.3f}  (lr_budget -> {lr_chars})"
+                    f"{new_val_mean:.3f} ({len(applied)} edits){cache_tag}"
                 )
                 current = new_skill
                 current_val_mean = new_val_mean
-                # Refresh train scores since skill changed
                 train_scores = _score_set(current, train, self.scorer, self.cfg, self.config)
                 self.reporter.write_train(train_scores, iter_num=it)
             else:
                 print(
                     f"[skillopt] REJECT iter {it}: val {current_val_mean:.3f} -> "
-                    f"{new_val_mean:.3f}  (lr_budget -> {lr_chars})"
+                    f"{new_val_mean:.3f} ({len(applied)} edits){cache_tag}"
                 )
-                rejected.append(edit)
-                locator_reject_iters.setdefault(edit.locator, []).append(it)
+                for e in applied:
+                    rejected.append(e)
+                    locator_reject_iters.setdefault(e.locator, []).append(it)
 
         # Final test scoring
         print("\n[skillopt] scoring final on test set...")

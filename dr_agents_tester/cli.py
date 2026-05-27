@@ -249,12 +249,14 @@ def cmd_skillopt_run(args: argparse.Namespace) -> None:
             optimizer_model=args.model or cfg.model,
             parallel_rollouts=args.parallel,
             seed=args.seed,
+            train_frac=args.train_frac,
+            val_frac=args.val_frac,
             drop_baseline_below=args.filter_baseline_below,
-            lr_chars_initial=args.lr_chars_initial,
-            lr_chars_floor=args.lr_chars_floor,
-            lr_chars_ceiling=args.lr_chars_ceiling,
-            lr_decay=args.lr_decay,
-            lr_growth=args.lr_growth,
+            lt_max=args.lt_max,
+            lt_floor=args.lt_floor,
+            lt_schedule=args.lt_schedule,
+            n_candidates=args.n_candidates,
+            max_edit_chars=args.max_edit_chars,
         ),
     )
     summary = loop.run()
@@ -438,20 +440,27 @@ def build_parser() -> argparse.ArgumentParser:
     so_run.add_argument("--limit", type=int, default=0, help="Cap rows (smoke test)")
     so_run.add_argument("--parallel", type=int, default=6, help="Parallel rollouts")
     so_run.add_argument("--seed", type=int, default=42, help="Split seed")
+    so_run.add_argument("--train-frac", type=float, default=0.6,
+                        help="Fraction of rows for the train/failure-pool split.")
+    so_run.add_argument("--val-frac", type=float, default=0.2,
+                        help="Fraction for the held-out validation gate. Test = remainder.")
     so_run.add_argument(
         "--filter-baseline-below",
         type=float,
         default=0.0,
         help="Pre-pass: drop rows whose baseline score is below this (filters generator-mis-spec).",
     )
-    so_run.add_argument("--lr-chars-initial", type=int, default=400,
-                        help="Initial textual learning-rate budget (chars per edit).")
-    so_run.add_argument("--lr-chars-floor", type=int, default=80)
-    so_run.add_argument("--lr-chars-ceiling", type=int, default=800)
-    so_run.add_argument("--lr-decay", type=float, default=0.7,
-                        help="LR budget *= this on reject (clamped to floor).")
-    so_run.add_argument("--lr-growth", type=float, default=1.3,
-                        help="LR budget *= this on accept (clamped to ceiling).")
+    so_run.add_argument("--lt-max", type=int, default=4,
+                        help="Edit-count budget L_t at the start (paper default 4).")
+    so_run.add_argument("--lt-floor", type=int, default=2,
+                        help="Minimum edit-count budget L_t (paper default 2).")
+    so_run.add_argument("--lt-schedule", default="cosine",
+                        choices=["cosine", "linear", "constant"],
+                        help="How L_t decays from lt-max to lt-floor over the run.")
+    so_run.add_argument("--n-candidates", type=int, default=8,
+                        help="Max candidate edits the optimizer proposes per step.")
+    so_run.add_argument("--max-edit-chars", type=int, default=800,
+                        help="Secondary guardrail: hard char cap on one edit's new_text.")
     _add_common_model_args(so_run)
     so_run.set_defaults(func=cmd_skillopt_run)
 
