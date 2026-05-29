@@ -109,6 +109,11 @@ class _Mock:
 
 def _install(mod_name, attrs=None):
     m = types.ModuleType(mod_name)
+    # Mark as a package so `from <mod_name>.sub import X` routes through the
+    # _MockFinder below instead of raising "not a package". Without this, any
+    # pre-installed mock (datarobot, datarobot_predict, ...) shadows the real
+    # package and blocks all its submodules from being mocked.
+    m.__path__ = []
     if attrs:
         for a in attrs:
             setattr(m, a, _make_recorder(f"{mod_name}.{a}"))
