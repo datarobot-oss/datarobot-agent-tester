@@ -195,6 +195,193 @@ def cmd_eval_report(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# skillopt sub-commands
+# ---------------------------------------------------------------------------
+
+
+def cmd_skillopt_gen_rows(args: argparse.Namespace) -> None:
+    from .skillopt.eval_gen import generate_rows, save_rows
+
+    cfg = _make_config(args)
+    cfg.validate()
+    skill_text = Path(args.skill).read_text()
+    docs = ""
+    if args.docs:
+        docs = Path(args.docs).read_text()
+    rows = generate_rows(
+        skill_text=skill_text,
+        docs_context=docs,
+        n=args.n,
+        code_pct=args.code_pct,
+        rubric_pct=100 - args.code_pct,
+        model=args.model or cfg.model,
+        config=cfg,
+    )
+    out = Path(args.out).resolve()
+    save_rows(rows, out)
+    print(f"✅ {len(rows)} rows -> {out}")
+
+
+def cmd_skillopt_run(args: argparse.Namespace) -> None:
+    from .skillopt.eval_gen import load_rows
+    from .skillopt.loop import LoopConfig, SkillOptLoop
+    from .skillopt.scorers import CompositeScorer, MockExecScorer, RubricScorer
+
+    cfg = _make_config(args)
+    cfg.validate()
+    rows = load_rows(Path(args.rows).resolve())
+    if args.limit:
+        rows = rows[: args.limit]
+    scorer = CompositeScorer(
+        scorers=[
+            MockExecScorer(),
+            RubricScorer(config=cfg, judge_model=args.test_model or cfg.test_model),
+        ]
+    )
+    loop = SkillOptLoop(
+        skill_path=Path(args.skill).resolve(),
+        rows=rows,
+        scorer=scorer,
+        config=cfg,
+        loop_config=LoopConfig(
+            iters=args.iters,
+            rollout_model=args.test_model or cfg.test_model,
+            optimizer_model=args.model or cfg.model,
+            parallel_rollouts=args.parallel,
+            seed=args.seed,
+            train_frac=args.train_frac,
+            val_frac=args.val_frac,
+            drop_baseline_below=args.filter_baseline_below,
+            lt_max=args.lt_max,
+            lt_floor=args.lt_floor,
+            lt_schedule=args.lt_schedule,
+            n_candidates=args.n_candidates,
+            max_edit_chars=args.max_edit_chars,
+        ),
+    )
+    summary = loop.run()
+    print(f"\n📊 baseline_test={summary['baseline_test']:.3f}  "
+          f"final_test={summary['final_test']:.3f}  "
+          f"Δ={summary['final_test'] - summary['baseline_test']:+.3f}")
+    print(f"📁 results: {loop.run_dir}")
+    print(f"🌐 open file://{loop.run_dir.resolve()}/report.html")
+
+
+def cmd_skillopt_optimize(args: argparse.Namespace) -> None:
+    """One-shot orchestrator: (generate or load rows) -> run loop -> report.
+
+    Skill-agnostic: works on any skill .md. Either bring your own --rows, or let
+    it generate an eval set from the skill with --generate N.
+    """
+    from .skillopt.eval_gen import generate_rows, load_rows, save_rows
+    from .skillopt.loop import LoopConfig, SkillOptLoop
+    from .skillopt.scorers import CompositeScorer, MockExecScorer, RubricScorer
+
+    cfg = _make_config(args)
+    cfg.validate()
+    skill_path = Path(args.skill).resolve()
+    if not skill_path.exists():
+        print(f"❌ Skill file not found: {skill_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # Resolve eval rows: explicit --rows wins; else generate to a sidecar file.
+    if args.rows:
+        rows_path = Path(args.rows).resolve()
+        rows = load_rows(rows_path)
+        print(f"📋 Using {len(rows)} provided eval rows from {rows_path}")
+    else:
+        rows_path = skill_path.parent / f"{skill_path.stem}.skillopt-rows.jsonl"
+        if rows_path.exists() and not args.regenerate:
+            rows = load_rows(rows_path)
+            print(f"📋 Reusing {len(rows)} cached eval rows at {rows_path} "
+                  f"(use --regenerate to rebuild)")
+        else:
+            docs = Path(args.docs).read_text() if args.docs else ""
+            print(f"🧬 Generating {args.generate} eval rows from skill...")
+            rows = generate_rows(
+                skill_text=skill_path.read_text(),
+                docs_context=docs,
+                n=args.generate,
+                code_pct=args.code_pct,
+                rubric_pct=100 - args.code_pct,
+                model=args.model or cfg.model,
+                config=cfg,
+            )
+            save_rows(rows, rows_path)
+            print(f"💾 Saved {len(rows)} rows -> {rows_path}")
+
+    scorer = CompositeScorer(
+        scorers=[
+            MockExecScorer(),
+            RubricScorer(config=cfg, judge_model=args.test_model or cfg.test_model),
+        ]
+    )
+    loop = SkillOptLoop(
+        skill_path=skill_path,
+        rows=rows,
+        scorer=scorer,
+        config=cfg,
+        loop_config=LoopConfig(
+            iters=args.iters,
+            rollout_model=args.test_model or cfg.test_model,
+            optimizer_model=args.model or cfg.model,
+            parallel_rollouts=args.parallel,
+            seed=args.seed,
+            train_frac=args.train_frac,
+            val_frac=args.val_frac,
+            drop_baseline_below=args.filter_baseline_below,
+            lt_max=args.lt_max,
+            lt_floor=args.lt_floor,
+            lt_schedule=args.lt_schedule,
+            n_candidates=args.n_candidates,
+        ),
+    )
+    summary = loop.run()
+    print(f"\n📊 baseline_test={summary['baseline_test']:.3f}  "
+          f"final_test={summary['final_test']:.3f}  "
+          f"Δ={summary['final_test'] - summary['baseline_test']:+.3f}")
+    print(f"📁 results: {loop.run_dir}")
+    print(f"🌐 open file://{loop.run_dir.resolve()}/report.html")
+
+
+def cmd_skillopt_score(args: argparse.Namespace) -> None:
+    """Score a skill against a rows file without optimizing — useful for baselines."""
+    from .skillopt.eval_gen import load_rows
+    from .skillopt.loop import LoopConfig, _mean, _score_set
+    from .skillopt.scorers import CompositeScorer, MockExecScorer, RubricScorer
+
+    cfg = _make_config(args)
+    cfg.validate()
+    rows = load_rows(Path(args.rows).resolve())
+    if args.limit:
+        rows = rows[: args.limit]
+    scorer = CompositeScorer(
+        scorers=[
+            MockExecScorer(),
+            RubricScorer(config=cfg, judge_model=args.test_model or cfg.test_model),
+        ]
+    )
+    skill = Path(args.skill).read_text()
+    scores = _score_set(
+        skill,
+        rows,
+        scorer,
+        LoopConfig(
+            rollout_model=args.test_model or cfg.test_model,
+            parallel_rollouts=args.parallel,
+        ),
+        cfg,
+    )
+    mean = _mean(scores)
+    print(f"\nmean score: {mean:.3f} ({sum(1 for s in scores if s.passed)}/{len(scores)} passed)")
+    for s in scores:
+        flag = "✓" if s.passed else "✗"
+        note = (s.detail.get("notes") or s.detail.get("error") or [""])
+        note_str = note if isinstance(note, str) else ", ".join(note)
+        print(f"  {flag} {s.row_id:30s} score={s.score:.2f}  {note_str[:80]}")
+
+
+# ---------------------------------------------------------------------------
 # Parser construction
 # ---------------------------------------------------------------------------
 
@@ -307,6 +494,87 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir", default="results", help="Output directory (default: results/)"
     )
     eval_report_p.set_defaults(func=cmd_eval_report)
+
+    # ---- skillopt ----
+    so_p = sub.add_parser(
+        "skillopt", help="SkillOpt: controllable text-space skill optimizer"
+    )
+    so_sub = so_p.add_subparsers(dest="command", required=True)
+
+    so_gen = so_sub.add_parser("gen-rows", help="Generate hybrid eval rows from a skill")
+    so_gen.add_argument("--skill", required=True, help="Path to skill .md")
+    so_gen.add_argument("--out", required=True, help="Output .jsonl path")
+    so_gen.add_argument("--docs", default=None, help="Optional supplemental docs markdown file")
+    so_gen.add_argument("--n", type=int, default=100, help="Number of rows to generate")
+    so_gen.add_argument("--code-pct", type=int, default=55, help="Percent code rows (vs rubric)")
+    _add_common_model_args(so_gen)
+    so_gen.set_defaults(func=cmd_skillopt_gen_rows)
+
+    so_run = so_sub.add_parser("run", help="Run the SkillOpt loop on a skill")
+    so_run.add_argument("--skill", required=True, help="Path to skill .md")
+    so_run.add_argument("--rows", required=True, help="Path to eval rows .jsonl")
+    so_run.add_argument("--iters", type=int, default=15, help="Number of optimizer iterations")
+    so_run.add_argument("--limit", type=int, default=0, help="Cap rows (smoke test)")
+    so_run.add_argument("--parallel", type=int, default=6, help="Parallel rollouts")
+    so_run.add_argument("--seed", type=int, default=42, help="Split seed")
+    so_run.add_argument("--train-frac", type=float, default=0.6,
+                        help="Fraction of rows for the train/failure-pool split.")
+    so_run.add_argument("--val-frac", type=float, default=0.2,
+                        help="Fraction for the held-out validation gate. Test = remainder.")
+    so_run.add_argument(
+        "--filter-baseline-below",
+        type=float,
+        default=0.0,
+        help="Pre-pass: drop rows whose baseline score is below this (filters generator-mis-spec).",
+    )
+    so_run.add_argument("--lt-max", type=int, default=4,
+                        help="Edit-count budget L_t at the start (paper default 4).")
+    so_run.add_argument("--lt-floor", type=int, default=2,
+                        help="Minimum edit-count budget L_t (paper default 2).")
+    so_run.add_argument("--lt-schedule", default="cosine",
+                        choices=["cosine", "linear", "constant"],
+                        help="How L_t decays from lt-max to lt-floor over the run.")
+    so_run.add_argument("--n-candidates", type=int, default=8,
+                        help="Max candidate edits the optimizer proposes per step.")
+    so_run.add_argument("--max-edit-chars", type=int, default=800,
+                        help="Secondary guardrail: hard char cap on one edit's new_text.")
+    _add_common_model_args(so_run)
+    so_run.set_defaults(func=cmd_skillopt_run)
+
+    so_opt = so_sub.add_parser(
+        "optimize",
+        help="One-shot: generate-or-load eval rows, run the loop, write the report.",
+    )
+    so_opt.add_argument("--skill", required=True, help="Path to ANY skill .md to optimize.")
+    so_opt.add_argument("--rows", default=None,
+                        help="Bring-your-own eval rows .jsonl. Omit to auto-generate.")
+    so_opt.add_argument("--generate", type=int, default=100,
+                        help="If no --rows, how many eval rows to generate (default 100).")
+    so_opt.add_argument("--regenerate", action="store_true",
+                        help="Force regenerating the cached eval rows.")
+    so_opt.add_argument("--docs", default=None, help="Optional supplemental docs markdown.")
+    so_opt.add_argument("--code-pct", type=int, default=55, help="Percent code rows.")
+    so_opt.add_argument("--iters", type=int, default=15)
+    so_opt.add_argument("--parallel", type=int, default=8)
+    so_opt.add_argument("--seed", type=int, default=42)
+    so_opt.add_argument("--train-frac", type=float, default=0.35)
+    so_opt.add_argument("--val-frac", type=float, default=0.45)
+    so_opt.add_argument("--filter-baseline-below", type=float, default=0.3)
+    so_opt.add_argument("--lt-max", type=int, default=4)
+    so_opt.add_argument("--lt-floor", type=int, default=2)
+    so_opt.add_argument("--lt-schedule", default="cosine",
+                        choices=["cosine", "linear", "constant"])
+    so_opt.add_argument("--n-candidates", type=int, default=8)
+    _add_common_model_args(so_opt)
+    so_opt.set_defaults(func=cmd_skillopt_optimize)
+
+    so_score = so_sub.add_parser("score", help="Score a skill against rows (no optimization)")
+    so_score.add_argument("--skill", required=True)
+    so_score.add_argument("--rows", required=True)
+    so_score.add_argument("--limit", type=int, default=0)
+    so_score.add_argument("--parallel", type=int, default=6)
+    _add_common_model_args(so_score)
+    so_score.set_defaults(func=cmd_skillopt_score)
 
     return parser
 

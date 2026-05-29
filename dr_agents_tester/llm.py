@@ -2,10 +2,47 @@
 
 from __future__ import annotations
 
+import random
 import time
 from dataclasses import dataclass
 
 from .config import Config
+
+# Retry transient gateway errors (502/503/504/429/connection/timeout).
+# Long-running batch jobs (e.g. SkillOpt) make hundreds of calls; without
+# retry, a single hiccup kills the whole run.
+_RETRY_ATTEMPTS = 4
+_RETRY_BACKOFF_BASE = 2.0
+
+
+def _is_transient(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(
+        m in msg
+        for m in (
+            "502", "503", "504", "bad gateway", "service unavailable",
+            "connection", "timeout", "timed out", "rate limit", "429",
+        )
+    )
+
+
+def _retry_call(fn, *, what: str):
+    last_exc: Exception | None = None
+    for attempt in range(1, _RETRY_ATTEMPTS + 1):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            if not _is_transient(e) or attempt == _RETRY_ATTEMPTS:
+                raise
+            delay = _RETRY_BACKOFF_BASE ** attempt + random.uniform(0, 1)
+            print(
+                f"[llm] transient error on {what} "
+                f"(attempt {attempt}/{_RETRY_ATTEMPTS}): "
+                f"{type(e).__name__}: {str(e)[:120]}; retrying in {delay:.1f}s"
+            )
+            time.sleep(delay)
+            last_exc = e
+    raise last_exc  # type: ignore[misc]
 
 
 @dataclass
@@ -51,12 +88,15 @@ def call_llm(prompt: str, model: str, config: Config) -> str:
         api_base = f"{base_url}/"
         call_model = model
 
-    response = litellm.completion(
-        model=call_model,
-        messages=[{"role": "user", "content": prompt}],
-        api_base=api_base,
-        api_key=config.api_key,
-        temperature=0.2,
+    response = _retry_call(
+        lambda: litellm.completion(
+            model=call_model,
+            messages=[{"role": "user", "content": prompt}],
+            api_base=api_base,
+            api_key=config.api_key,
+            temperature=0.2,
+        ),
+        what=f"call_llm({call_model})",
     )
     content = response.choices[0].message.content
     if not content or not content.strip():
@@ -93,12 +133,15 @@ def call_llm_with_usage(prompt: str, model: str, config: Config) -> tuple[str, L
         call_model = model
 
     start = time.monotonic()
-    response = litellm.completion(
-        model=call_model,
-        messages=[{"role": "user", "content": prompt}],
-        api_base=api_base,
-        api_key=config.api_key,
-        temperature=0.2,
+    response = _retry_call(
+        lambda: litellm.completion(
+            model=call_model,
+            messages=[{"role": "user", "content": prompt}],
+            api_base=api_base,
+            api_key=config.api_key,
+            temperature=0.2,
+        ),
+        what=f"call_llm_with_usage({call_model})",
     )
     elapsed = time.monotonic() - start
 
