@@ -66,10 +66,33 @@ class TestParseVerdictSentinel:
             ("body\n\nVERDICT: GOOD.\n", "GOOD"),
             # case-insensitive
             ("body\n\nverdict: needs work", "NEEDS WORK"),
+            # trailing explanation after a real separator is tolerated
+            ("body\n\nVERDICT: GOOD — minor tweaks only", "GOOD"),
+            ("body\n\nVERDICT: NEEDS WORK - see gaps above", "NEEDS WORK"),
         ],
     )
     def test_sentinel_line_is_parsed(self, report: str, expected: str) -> None:
         assert parse_verdict(report) == expected
+
+    def test_ambiguous_continuation_is_not_a_verdict(self) -> None:
+        # a bare continuation is ambiguity, not a separator; must retry
+        assert parse_verdict("body\n\nVERDICT: GOOD or maybe NEEDS WORK") == "UNKNOWN"
+
+    def test_sentinel_quoted_mid_report_cannot_stand_in_for_the_final_line(
+        self,
+    ) -> None:
+        # a verdict-shaped line quoted in the body (skills under test define
+        # report formats of their own) must not rescue a malformed final line
+        report = (
+            "The skill asks for\n"
+            "    VERDICT: GOOD\n"
+            "at the end of its own reports.\n\n"
+            "More analysis here.\n"
+            "Closing remarks.\n"
+            "Final thoughts on structure.\n\n"
+            "VERDICT: GOOOD\n"
+        )
+        assert parse_verdict(report) == "UNKNOWN"
 
     def test_sentinel_wins_over_heading(self) -> None:
         # the sentinel is the enforced contract; the heading section is the
@@ -141,6 +164,18 @@ class TestParseVerdictHeadingFallback:
         report = "## Overall Verdict\nThe skill needs improvement but is serviceable."
         assert parse_verdict(report) == "UNKNOWN"
 
+    def test_last_heading_wins_over_a_quoted_earlier_one(self) -> None:
+        # judges quote skill text; a quoted verdict heading earlier in the
+        # report must not shadow the real one at the end
+        report = (
+            "### Overall verdict\n"
+            "GOOD - quoted from the skill's own report template\n\n"
+            "More analysis.\n\n"
+            "### Overall verdict\n"
+            "INCOMPLETE - the real verdict\n"
+        )
+        assert parse_verdict(report) == "INCOMPLETE"
+
 
 # ---------------------------------------------------------------------------
 # verdict_passes
@@ -177,6 +212,13 @@ class TestPromptContract:
         # silently in production; fail here instead
         prompt = _build_skill_test_prompt("commit", "# skill body")
         assert pytest_plugin._HEADING_RE.search(prompt) is not None
+
+    def test_prompt_itself_contains_no_parseable_verdict(self) -> None:
+        # the prompt demonstrates the sentinel form; if the example ever
+        # becomes parseable, a judge echoing the instructions verbatim would
+        # produce a false verdict. the placeholder must stay unparseable
+        prompt = _build_skill_test_prompt("commit", "# skill body")
+        assert parse_verdict(prompt) == "UNKNOWN"
 
 
 # ---------------------------------------------------------------------------

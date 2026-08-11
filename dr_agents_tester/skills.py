@@ -112,10 +112,10 @@ One of: GOOD (minor tweaks only) / NEEDS WORK (several meaningful gaps) / INCOMP
 
 Finally, the very last line of your response must be the verdict alone, in exactly this form:
 
-{VERDICT_PREFIX} GOOD
+{VERDICT_PREFIX} <verdict>
 
-where GOOD is replaced by your actual verdict token: GOOD, NEEDS WORK, or INCOMPLETE.
-No markdown formatting on that line, and nothing after it.
+where <verdict> is GOOD, NEEDS WORK, or INCOMPLETE. No markdown formatting on that line,
+and nothing after it.
 """
 
 

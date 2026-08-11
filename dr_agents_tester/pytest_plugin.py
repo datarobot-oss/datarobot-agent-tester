@@ -115,12 +115,20 @@ class HashCache:
 _TOKEN_ALT = r"(INCOMPLETE|NEEDS\s+WORK|GOOD)"
 
 # Primary: the mandatory sentinel line the test prompt demands as the report's
-# final line, e.g. "VERDICT: NEEDS WORK".  Anchored to the end of its line so an
+# final line, e.g. "VERDICT: NEEDS WORK".  The token may carry a trailing
+# explanation after a real separator ("VERDICT: GOOD — minor tweaks"), but a
+# bare continuation ("VERDICT: GOOD or maybe...") stays unparseable, so an
 # echoed template ("VERDICT: <GOOD or ...>") can never parse as a verdict.
 _SENTINEL_RE = re.compile(
-    rf"^[\s>*_`]*{re.escape(VERDICT_PREFIX)}\s*[*_`]*\s*{_TOKEN_ALT}[*_`.!\s]*$",
+    rf"^[\s>*_`]*{re.escape(VERDICT_PREFIX)}\s*[*_`]*\s*{_TOKEN_ALT}"
+    rf"[*_`]*\s*(?:[—–:.!;,-].*)?$",
     re.IGNORECASE | re.MULTILINE,
 )
+
+# The sentinel is only honored near the end of the report.  A verdict-shaped
+# line quoted mid-report (skills under test define report formats of their
+# own) must not stand in for a missing or malformed final verdict line.
+_SENTINEL_TAIL_LINES = 3
 
 # Compat: pre-sentinel reports end in an "Overall verdict" heading.  Judges
 # freely reformat — any heading level, any case, verdict inline or below.
@@ -150,25 +158,31 @@ def parse_verdict(report: str) -> str:
 
     Resolution order:
 
-    1. The ``VERDICT: <token>`` sentinel line (last occurrence wins).  This is
-       the contract the test prompt enforces.
-    2. The ``Overall verdict`` heading, at any level: the token is read from
-       the heading's own line or the first non-empty line below it, anchored
-       at line start.  Kept for reports produced by the pre-sentinel prompt.
+    1. The ``VERDICT: <token>`` sentinel line, honored only within the last
+       few non-empty lines of the report (last occurrence wins).  This is the
+       contract the test prompt enforces.
+    2. The ``Overall verdict`` heading, at any level, last occurrence: the
+       token is read from the heading's own line or the first non-empty line
+       below it, anchored at line start.  Kept for reports produced by the
+       pre-sentinel prompt.  Last occurrence, because judges quote skill text,
+       and a quoted heading earlier in the report must not shadow the real one.
 
     Body prose is never scanned.  The prompt itself lists INCOMPLETE as an
     option, so the word is effectively guaranteed to appear somewhere in the
     report text — scanning for it is how this parser produced false failures
     on reports whose actual verdict was NEEDS WORK.
     """
-    sentinels = _SENTINEL_RE.findall(report)
+    tail_lines = [line for line in report.splitlines() if line.strip()]
+    tail = "\n".join(tail_lines[-_SENTINEL_TAIL_LINES:])
+    sentinels = _SENTINEL_RE.findall(tail)
     if sentinels:
         return _normalize_token(sentinels[-1])
 
-    heading = _HEADING_RE.search(report)
-    if heading:
+    headings = list(_HEADING_RE.finditer(report))
+    if headings:
+        heading = headings[-1]
         candidates = [heading.group(1)]
-        candidates += report[heading.end() :].splitlines()[:_VERDICT_LOOKAHEAD_LINES]
+        candidates += report[heading.end() :].splitlines()[1 : _VERDICT_LOOKAHEAD_LINES + 1]
         for line in candidates:
             if not line.strip():
                 continue
