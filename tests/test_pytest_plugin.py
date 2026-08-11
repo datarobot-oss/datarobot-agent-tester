@@ -78,6 +78,30 @@ class TestParseVerdictSentinel:
         # a bare continuation is ambiguity, not a separator; must retry
         assert parse_verdict("body\n\nVERDICT: GOOD or maybe NEEDS WORK") == "UNKNOWN"
 
+    @pytest.mark.parametrize(
+        "report",
+        [
+            # an echoed option list is not a choice, whatever the separator
+            "body\n\nVERDICT: GOOD, NEEDS WORK, or INCOMPLETE",
+            "body\n\nVERDICT: GOOD; NEEDS WORK; INCOMPLETE",
+            # a second token in the explanation makes the line ambiguous
+            "body\n\nVERDICT: NEEDS WORK, not INCOMPLETE",
+        ],
+    )
+    def test_a_sentinel_line_with_two_tokens_is_not_a_verdict(self, report: str) -> None:
+        assert parse_verdict(report) == "UNKNOWN"
+
+    def test_malformed_sentinel_does_not_fall_back_to_the_heading(self) -> None:
+        # a sentinel-shaped final line that breaks the contract means the
+        # judge is off-contract; retry for a clean sample instead of guessing
+        # from the heading section
+        report = (
+            "## Overall Verdict\n"
+            "**NEEDS WORK** — gaps\n\n"
+            "VERDICT: GOOD, NEEDS WORK, or INCOMPLETE\n"
+        )
+        assert parse_verdict(report) == "UNKNOWN"
+
     def test_sentinel_quoted_mid_report_cannot_stand_in_for_the_final_line(
         self,
     ) -> None:

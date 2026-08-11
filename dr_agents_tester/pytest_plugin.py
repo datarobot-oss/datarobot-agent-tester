@@ -115,15 +115,18 @@ class HashCache:
 _TOKEN_ALT = r"(INCOMPLETE|NEEDS\s+WORK|GOOD)"
 
 # Primary: the mandatory sentinel line the test prompt demands as the report's
-# final line, e.g. "VERDICT: NEEDS WORK".  The token may carry a trailing
-# explanation after a real separator ("VERDICT: GOOD — minor tweaks"), but a
-# bare continuation ("VERDICT: GOOD or maybe...") stays unparseable, so an
-# echoed template ("VERDICT: <GOOD or ...>") can never parse as a verdict.
-_SENTINEL_RE = re.compile(
+# final line, e.g. "VERDICT: NEEDS WORK".  A line only counts as a verdict when
+# it carries exactly ONE token: the trailing text after a separator may be an
+# explanation ("VERDICT: GOOD — minor tweaks") but never another token, so an
+# echoed option list ("VERDICT: GOOD, NEEDS WORK, or INCOMPLETE") and an echoed
+# template ("VERDICT: <GOOD or ...>") can never parse as a verdict.
+_SENTINEL_PREFIX_RE = re.compile(rf"^[\s>*_`]*{re.escape(VERDICT_PREFIX)}", re.IGNORECASE)
+_SENTINEL_LINE_RE = re.compile(
     rf"^[\s>*_`]*{re.escape(VERDICT_PREFIX)}\s*[*_`]*\s*{_TOKEN_ALT}"
-    rf"[*_`]*\s*(?:[—–:.!;,-].*)?$",
-    re.IGNORECASE | re.MULTILINE,
+    rf"[*_`]*\s*(?:[—–:.!;,-]\s*(?P<rest>.*))?$",
+    re.IGNORECASE,
 )
+_TOKEN_ANYWHERE_RE = re.compile(_TOKEN_ALT, re.IGNORECASE)
 
 # The sentinel is only honored near the end of the report.  A verdict-shaped
 # line quoted mid-report (skills under test define report formats of their
@@ -159,8 +162,11 @@ def parse_verdict(report: str) -> str:
     Resolution order:
 
     1. The ``VERDICT: <token>`` sentinel line, honored only within the last
-       few non-empty lines of the report (last occurrence wins).  This is the
-       contract the test prompt enforces.
+       few non-empty lines of the report.  The last sentinel-shaped line is
+       authoritative: it must carry exactly one verdict token, and a malformed
+       one (garbage token, or a second token in the trailing text) returns
+       UNKNOWN outright rather than falling back.  A judge that is off the
+       sentinel contract gets a retry, not a guess.
     2. The ``Overall verdict`` heading, at any level, last occurrence: the
        token is read from the heading's own line or the first non-empty line
        below it, anchored at line start.  Kept for reports produced by the
@@ -173,10 +179,13 @@ def parse_verdict(report: str) -> str:
     on reports whose actual verdict was NEEDS WORK.
     """
     tail_lines = [line for line in report.splitlines() if line.strip()]
-    tail = "\n".join(tail_lines[-_SENTINEL_TAIL_LINES:])
-    sentinels = _SENTINEL_RE.findall(tail)
-    if sentinels:
-        return _normalize_token(sentinels[-1])
+    for line in reversed(tail_lines[-_SENTINEL_TAIL_LINES:]):
+        if not _SENTINEL_PREFIX_RE.match(line):
+            continue
+        m = _SENTINEL_LINE_RE.match(line)
+        if m and not _TOKEN_ANYWHERE_RE.search(m.group("rest") or ""):
+            return _normalize_token(m.group(1))
+        return "UNKNOWN"
 
     headings = list(_HEADING_RE.finditer(report))
     if headings:
