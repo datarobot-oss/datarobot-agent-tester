@@ -16,6 +16,11 @@ from .llm import call_llm
 REPORT_SUFFIX = ".skill-report.md"
 NOTES_SUFFIX = ".skill-revision-notes.md"
 
+# The machine-readable verdict contract: the test prompt requires the report to
+# end with a "VERDICT: <token>" line, and pytest_plugin.parse_verdict reads it.
+# Shared as a constant so prompt and parser cannot drift apart.
+VERDICT_PREFIX = "VERDICT:"
+
 
 # ---------------------------------------------------------------------------
 # Prompt builders
@@ -104,6 +109,13 @@ text where possible, not just "add more detail."
 ### Overall verdict
 One of: GOOD (minor tweaks only) / NEEDS WORK (several meaningful gaps) / INCOMPLETE
 (an agent would produce inconsistent or poor results). One sentence explaining why.
+
+Finally, the very last line of your response must be the verdict alone, in exactly this form:
+
+{VERDICT_PREFIX} GOOD
+
+where GOOD is replaced by your actual verdict token: GOOD, NEEDS WORK, or INCOMPLETE.
+No markdown formatting on that line, and nothing after it.
 """
 
 

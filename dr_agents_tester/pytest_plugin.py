@@ -39,7 +39,7 @@ except ImportError as _pytest_import_error:  # pragma: no cover
     ) from _pytest_import_error
 
 from .config import Config
-from .skills import Skills
+from .skills import VERDICT_PREFIX, Skills
 
 __all__ = [
     "HashCache",
@@ -112,48 +112,83 @@ class HashCache:
 # ---------------------------------------------------------------------------
 
 
+_TOKEN_ALT = r"(INCOMPLETE|NEEDS\s+WORK|GOOD)"
+
+# Primary: the mandatory sentinel line the test prompt demands as the report's
+# final line, e.g. "VERDICT: NEEDS WORK".  Anchored to the end of its line so an
+# echoed template ("VERDICT: <GOOD or ...>") can never parse as a verdict.
+_SENTINEL_RE = re.compile(
+    rf"^[\s>*_`]*{re.escape(VERDICT_PREFIX)}\s*[*_`]*\s*{_TOKEN_ALT}[*_`.!\s]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Compat: pre-sentinel reports end in an "Overall verdict" heading.  Judges
+# freely reformat — any heading level, any case, verdict inline or below.
+_HEADING_RE = re.compile(
+    r"^#{1,6}\s*Overall\s+Verdict\b[ \t]*:?[ \t]*(.*)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# The verdict token must open its line (markdown wrapping tolerated).  Tokens
+# buried mid-sentence are prose, not verdicts.
+_LINE_TOKEN_RE = re.compile(rf"^[\s>*_`\-:]*{_TOKEN_ALT}\b", re.IGNORECASE)
+
+# How many lines below the heading may hold the verdict (blank lines between
+# the heading and the verdict are common).
+_VERDICT_LOOKAHEAD_LINES = 5
+
+
+def _normalize_token(token: str) -> str:
+    return re.sub(r"\s+", " ", token.upper())
+
+
 def parse_verdict(report: str) -> str:
-    """Extract the Overall Verdict token from a skill test report.
+    """Extract the verdict token from a skill test report.
 
     Returns one of ``"GOOD"``, ``"NEEDS WORK"``, ``"INCOMPLETE"``, or
-    ``"UNKNOWN"`` when the verdict line cannot be found.
+    ``"UNKNOWN"`` when no verdict can be located.
 
-    The LLM formats the verdict line as e.g. ``**NEEDS WORK** — explanation``.
-    We only check the label portion (before any em-dash) to avoid false
-    matches where the explanation text itself contains the word "incomplete".
+    Resolution order:
+
+    1. The ``VERDICT: <token>`` sentinel line (last occurrence wins).  This is
+       the contract the test prompt enforces.
+    2. The ``Overall verdict`` heading, at any level: the token is read from
+       the heading's own line or the first non-empty line below it, anchored
+       at line start.  Kept for reports produced by the pre-sentinel prompt.
+
+    Body prose is never scanned.  The prompt itself lists INCOMPLETE as an
+    option, so the word is effectively guaranteed to appear somewhere in the
+    report text — scanning for it is how this parser produced false failures
+    on reports whose actual verdict was NEEDS WORK.
     """
-    match = re.search(
-        r"###\s+Overall\s+verdict.*?\n(.+?)(?:\n|$)",
-        report,
-        re.IGNORECASE | re.DOTALL,
-    )
-    full_line = match.group(1).strip().upper() if match else report.upper()
+    sentinels = _SENTINEL_RE.findall(report)
+    if sentinels:
+        return _normalize_token(sentinels[-1])
 
-    # Only inspect the label part — everything before the first em-dash or
-    # regular dash separator so "NEEDS WORK — ...incomplete results..." doesn't
-    # trigger a false INCOMPLETE match.
-    label = re.split(r"\s*[—–-]\s*", full_line, maxsplit=1)[0].strip()
-
-    for token in ("INCOMPLETE", "NEEDS WORK", "GOOD"):
-        if token in label:
-            return token
-
-    # Fallback: search the whole line (handles unusual LLM formatting)
-    for token in ("INCOMPLETE", "NEEDS WORK", "GOOD"):
-        if token in full_line:
-            return token
+    heading = _HEADING_RE.search(report)
+    if heading:
+        candidates = [heading.group(1)]
+        candidates += report[heading.end() :].splitlines()[:_VERDICT_LOOKAHEAD_LINES]
+        for line in candidates:
+            if not line.strip():
+                continue
+            token = _LINE_TOKEN_RE.match(line)
+            if token:
+                return _normalize_token(token.group(1))
+            break  # the first non-empty line is the verdict line; don't scan prose
 
     return "UNKNOWN"
 
 
 def verdict_passes(report: str) -> bool:
-    """Return True when the skill verdict is not INCOMPLETE.
+    """Return True when the verdict affirmatively passes the gate.
 
-    A verdict of GOOD, NEEDS WORK, or UNKNOWN is considered passing because the
-    skill is at least coherent enough for an agent to follow.  Only INCOMPLETE
-    means the skill would produce inconsistent or poor results.
+    GOOD and NEEDS WORK pass; the skill is coherent enough for an agent to
+    follow.  INCOMPLETE fails.  UNKNOWN — no parseable verdict — also fails:
+    a gate that cannot read the verdict must not silently pass, otherwise a
+    judge formatting drift disables the gate without anyone noticing.
     """
-    return parse_verdict(report) != "INCOMPLETE"
+    return parse_verdict(report) in ("GOOD", "NEEDS WORK")
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +202,18 @@ def _md5(path: Path) -> str:
 
 def _skill_files(skills_dir: Path) -> list[Path]:
     return sorted(skills_dir.glob("*/SKILL.md"))
+
+
+def _judge_with_retry(skills: Skills, skill_path: Path, test_model: str) -> str:
+    """Run the judge, re-sampling once if the report has no parseable verdict.
+
+    Judges occasionally drop the verdict line; one fresh sample usually
+    recovers.  The caller decides what a still-unparseable report means.
+    """
+    report = skills.test(skill_path, test_model=test_model)
+    if parse_verdict(report) != "UNKNOWN":
+        return report
+    return skills.test(skill_path, test_model=test_model)
 
 
 # ---------------------------------------------------------------------------
@@ -243,16 +290,26 @@ def register_skills_e2e(
         test_model = os.environ.get("AGENTS_MD_TEST_MODEL", default_test_model)
         skills = Skills(cfg)
         try:
-            report = skills.test(skill_path, test_model=test_model)
+            report = _judge_with_retry(skills, skill_path, test_model)
         except Exception as exc:
             err = str(exc).lower()
             if any(kw in err for kw in _TRANSIENT_ERROR_KEYWORDS):
                 pytest.skip(f"LLM unavailable in this environment — {exc}")
             raise
 
+        verdict = parse_verdict(report)
+        if verdict == "UNKNOWN":
+            # Fail closed, loudly and distinctly: this is a judge output
+            # contract breach, not a judgment on the skill's quality.
+            pytest.fail(
+                f"Judge did not emit a parseable verdict for skill "
+                f"'{skill_path.parent.name}' (after one retry). The gate "
+                f"cannot pass a report it cannot read.\n\n{report}"
+            )
+
         # Update hash only after a passing verdict so a failing skill is
         # re-evaluated on the next run rather than silently skipped.
-        assert verdict_passes(report), (
+        assert verdict != "INCOMPLETE", (
             f"Skill '{skill_path.parent.name}' is INCOMPLETE.\n\n{report}"
         )
         _hash_store.update(skill_key, skill_path)
