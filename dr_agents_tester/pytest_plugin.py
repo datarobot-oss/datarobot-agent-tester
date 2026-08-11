@@ -116,17 +116,21 @@ _TOKEN_ALT = r"(INCOMPLETE|NEEDS\s+WORK|GOOD)"
 
 # Primary: the mandatory sentinel line the test prompt demands as the report's
 # final line, e.g. "VERDICT: NEEDS WORK".  A line only counts as a verdict when
-# it carries exactly ONE token: the trailing text after a separator may be an
-# explanation ("VERDICT: GOOD — minor tweaks") but never another token, so an
-# echoed option list ("VERDICT: GOOD, NEEDS WORK, or INCOMPLETE") and an echoed
-# template ("VERDICT: <GOOD or ...>") can never parse as a verdict.
+# it carries exactly ONE token.  The trailing text after a separator is an
+# explanation and may use verdict vocabulary ("VERDICT: NEEDS WORK — the setup
+# is incomplete"); what can never parse as a verdict is a token LIST: an echoed
+# option list ("VERDICT: GOOD, NEEDS WORK, or INCOMPLETE") or an echoed
+# template ("VERDICT: <GOOD or ...>", rejected by the separator class).
 _SENTINEL_PREFIX_RE = re.compile(rf"^[\s>*_`]*{re.escape(VERDICT_PREFIX)}", re.IGNORECASE)
 _SENTINEL_LINE_RE = re.compile(
     rf"^[\s>*_`]*{re.escape(VERDICT_PREFIX)}\s*[*_`]*\s*{_TOKEN_ALT}"
-    rf"[*_`]*\s*(?:[—–:.!;,-]\s*(?P<rest>.*))?$",
+    rf"[*_`]*\s*(?P<tail>[—–:.!;,-].*)?$",
     re.IGNORECASE,
 )
-_TOKEN_ANYWHERE_RE = re.compile(_TOKEN_ALT, re.IGNORECASE)
+# List items arrive after "," or ";" (optionally "not").  The tail keeps its
+# leading separator so an option list's first echoed token (", NEEDS WORK, ...")
+# is caught even though _SENTINEL_LINE_RE consumed the comma that preceded it.
+_ECHOED_TOKEN_RE = re.compile(rf"[;,]\s*(?:not\s+)?{_TOKEN_ALT}", re.IGNORECASE)
 
 # The sentinel is only honored near the end of the report.  A verdict-shaped
 # line quoted mid-report (skills under test define report formats of their
@@ -164,9 +168,11 @@ def parse_verdict(report: str) -> str:
     1. The ``VERDICT: <token>`` sentinel line, honored only within the last
        few non-empty lines of the report.  The last sentinel-shaped line is
        authoritative: it must carry exactly one verdict token, and a malformed
-       one (garbage token, or a second token in the trailing text) returns
-       UNKNOWN outright rather than falling back.  A judge that is off the
-       sentinel contract gets a retry, not a guess.
+       one (garbage token, or an echoed token list in the trailing text)
+       returns UNKNOWN outright rather than falling back.  A trailing
+       explanation may use verdict vocabulary; only ``,``/``;``-separated
+       tokens read as a list.  A judge that is off the sentinel contract gets
+       a retry, not a guess.
     2. The ``Overall verdict`` heading, at any level, last occurrence: the
        token is read from the heading's own line or the first non-empty line
        below it, anchored at line start.  Kept for reports produced by the
@@ -183,7 +189,7 @@ def parse_verdict(report: str) -> str:
         if not _SENTINEL_PREFIX_RE.match(line):
             continue
         m = _SENTINEL_LINE_RE.match(line)
-        if m and not _TOKEN_ANYWHERE_RE.search(m.group("rest") or ""):
+        if m and not _ECHOED_TOKEN_RE.search(m.group("tail") or ""):
             return _normalize_token(m.group(1))
         return "UNKNOWN"
 

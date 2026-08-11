@@ -69,6 +69,13 @@ class TestParseVerdictSentinel:
             # trailing explanation after a real separator is tolerated
             ("body\n\nVERDICT: GOOD — minor tweaks only", "GOOD"),
             ("body\n\nVERDICT: NEEDS WORK - see gaps above", "NEEDS WORK"),
+            # verdict VOCABULARY in the explanation is not a second token:
+            # captured NEEDS WORK prose uses these words routinely
+            ("body\n\nVERDICT: NEEDS WORK — the setup is incomplete", "NEEDS WORK"),
+            ("body\n\nVERDICT: GOOD — no incomplete sections found", "GOOD"),
+            ("body\n\nVERDICT: INCOMPLETE — several tools still need work", "INCOMPLETE"),
+            # explanation may even contain a comma, as long as no token follows it
+            ("body\n\nVERDICT: NEEDS WORK — auth is stubbed, docs are thin", "NEEDS WORK"),
         ],
     )
     def test_sentinel_line_is_parsed(self, report: str, expected: str) -> None:
