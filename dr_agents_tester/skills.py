@@ -104,6 +104,21 @@ text where possible, not just "add more detail."
 ### Overall verdict
 One of: GOOD (minor tweaks only) / NEEDS WORK (several meaningful gaps) / INCOMPLETE
 (an agent would produce inconsistent or poor results). One sentence explaining why.
+
+## Verdict format
+
+The verdict section is read by an automated test, so its shape matters:
+
+- Reproduce the heading exactly as `### Overall verdict`. Do not add a document title
+  above it or shift the report's heading levels.
+- Start the line directly beneath the heading with the verdict label itself — nothing
+  before it — then the explanation.
+- Use the label verbatim: `GOOD`, `NEEDS WORK`, or `INCOMPLETE`.
+
+For example:
+
+### Overall verdict
+NEEDS WORK — the skill leaves error handling undefined, so two agents would diverge.
 """
 
 
