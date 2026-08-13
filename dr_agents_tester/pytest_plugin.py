@@ -111,6 +111,24 @@ class HashCache:
 # Verdict helpers
 # ---------------------------------------------------------------------------
 
+# Matches the verdict heading in any of the forms models actually emit:
+#   "### Overall verdict", "## Overall Verdict", "**Overall verdict:**",
+#   "### Overall verdict: NEEDS WORK".  Anything trailing on the same line is
+#   captured as ``inline`` so a same-line verdict is not lost.
+_VERDICT_HEADING_RE = re.compile(
+    r"^[ \t]*(?:#{1,6}[ \t]*)?[*_`]*[ \t]*overall[ \t]+verdict[ \t]*[:：]?[ \t]*[*_`]*[ \t]*[:：]?(?P<inline>.*)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Verdict tokens, matched as whole words.  Order here is not a priority list —
+# ``_first_token`` picks whichever token appears earliest in the verdict line,
+# so the label always beats a keyword buried later in the explanation.
+_VERDICT_TOKEN_PATTERNS = (
+    ("INCOMPLETE", re.compile(r"\bINCOMPLETE\b", re.IGNORECASE)),
+    ("NEEDS WORK", re.compile(r"\bNEEDS[\s_-]*WORK\b", re.IGNORECASE)),
+    ("GOOD", re.compile(r"\bGOOD\b", re.IGNORECASE)),
+)
+
 
 def parse_verdict(report: str) -> str:
     """Extract the Overall Verdict token from a skill test report.
@@ -118,32 +136,69 @@ def parse_verdict(report: str) -> str:
     Returns one of ``"GOOD"``, ``"NEEDS WORK"``, ``"INCOMPLETE"``, or
     ``"UNKNOWN"`` when the verdict line cannot be found.
 
-    The LLM formats the verdict line as e.g. ``**NEEDS WORK** — explanation``.
-    We only check the label portion (before any em-dash) to avoid false
-    matches where the explanation text itself contains the word "incomplete".
+    The prompt asks for a ``### Overall verdict`` heading followed by a line
+    like ``**NEEDS WORK** — explanation``, but models routinely drift: they
+    shift the whole report a heading level (``## Overall Verdict``), bold the
+    label instead of using a heading, or put the verdict inline on the heading
+    line.  All of those are accepted here.
+
+    Only the verdict line itself is inspected, and the *earliest* token on it
+    wins, so an explanation such as "NEEDS WORK — the Windows guards are
+    incomplete" is not misread as INCOMPLETE.  When no verdict line can be
+    located we return UNKNOWN rather than guessing from the report body.
     """
-    match = re.search(
-        r"###\s+Overall\s+verdict.*?\n(.+?)(?:\n|$)",
-        report,
-        re.IGNORECASE | re.DOTALL,
-    )
-    full_line = match.group(1).strip().upper() if match else report.upper()
+    line = _verdict_line(report)
+    if line is None:
+        return "UNKNOWN"
+    return _first_token(line) or "UNKNOWN"
 
-    # Only inspect the label part — everything before the first em-dash or
-    # regular dash separator so "NEEDS WORK — ...incomplete results..." doesn't
-    # trigger a false INCOMPLETE match.
-    label = re.split(r"\s*[—–-]\s*", full_line, maxsplit=1)[0].strip()
 
-    for token in ("INCOMPLETE", "NEEDS WORK", "GOOD"):
-        if token in label:
+def _verdict_line(report: str) -> str | None:
+    """Return the text carrying the verdict, or None if there is no such line.
+
+    Prefers the "Overall verdict" section; falls back to a line that *starts*
+    with a verdict token (never a substring match on the whole report).
+    """
+    match = _VERDICT_HEADING_RE.search(report)
+    if match:
+        # "### Overall verdict: NEEDS WORK" — the verdict is on the heading line.
+        # Trailing text that carries no verdict (e.g. "## Overall verdict (final)")
+        # is ignored so we still look at the line below.
+        inline = match.group("inline").strip().strip("*`_").strip()
+        if inline and _first_token(inline):
+            return inline
+        # Otherwise it is the next non-empty line after the heading.
+        for line in report[match.end() :].splitlines():
+            if line.strip():
+                return line.strip()
+        return None
+
+    # No heading at all: accept a line that leads with a verdict token, e.g. a
+    # bare "**INCOMPLETE** — ..." paragraph.
+    for line in report.splitlines():
+        stripped = line.strip().lstrip("#*`_ ").strip()
+        if stripped and _leading_token(stripped):
+            return stripped
+
+    return None
+
+
+def _first_token(line: str) -> str | None:
+    """Return the verdict token that appears earliest in *line*."""
+    best: tuple[int, str] | None = None
+    for token, pattern in _VERDICT_TOKEN_PATTERNS:
+        found = pattern.search(line)
+        if found and (best is None or found.start() < best[0]):
+            best = (found.start(), token)
+    return best[1] if best else None
+
+
+def _leading_token(line: str) -> str | None:
+    """Return the verdict token *line* starts with, if any."""
+    for token, pattern in _VERDICT_TOKEN_PATTERNS:
+        if pattern.match(line):
             return token
-
-    # Fallback: search the whole line (handles unusual LLM formatting)
-    for token in ("INCOMPLETE", "NEEDS WORK", "GOOD"):
-        if token in full_line:
-            return token
-
-    return "UNKNOWN"
+    return None
 
 
 def verdict_passes(report: str) -> bool:
