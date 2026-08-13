@@ -120,13 +120,30 @@ _VERDICT_HEADING_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-# Verdict tokens, matched as whole words.  Order here is not a priority list —
-# ``_first_token`` picks whichever token appears earliest in the verdict line,
-# so the label always beats a keyword buried later in the explanation.
-_VERDICT_TOKEN_PATTERNS = (
-    ("INCOMPLETE", re.compile(r"\bINCOMPLETE\b", re.IGNORECASE)),
-    ("NEEDS WORK", re.compile(r"\bNEEDS[\s_-]*WORK\b", re.IGNORECASE)),
-    ("GOOD", re.compile(r"\bGOOD\b", re.IGNORECASE)),
+# Verdict tokens.  Boundaries are spelled out rather than using ``\b`` because
+# ``_`` is a word character, so ``\bGOOD\b`` would not match ``_GOOD_``.
+_VERDICT_TOKEN_REGEXES = (
+    ("INCOMPLETE", r"(?<![A-Za-z0-9])INCOMPLETE(?![A-Za-z0-9])"),
+    ("NEEDS WORK", r"(?<![A-Za-z0-9])NEEDS[\s_-]*WORK(?![A-Za-z0-9])"),
+    ("GOOD", r"(?<![A-Za-z0-9])GOOD(?![A-Za-z0-9])"),
+)
+
+# Matched anywhere in the verdict line.  Order here is not a priority list —
+# ``_first_token`` picks whichever token appears earliest in the line, so the
+# label always beats a keyword buried later in the explanation.
+_VERDICT_TOKEN_PATTERNS = tuple(
+    (token, re.compile(regex, re.IGNORECASE)) for token, regex in _VERDICT_TOKEN_REGEXES
+)
+
+# Matched against a whole line to decide whether that line *is* the verdict:
+# the token must lead it, bare or wrapped in emphasis markers.  Markdown
+# structure is excluded by construction — a heading ("### Incomplete Windows
+# guards"), list item ("* Good clear purpose") or blockquote ("> INCOMPLETE …")
+# starts with a character this pattern does not admit, so a section title or
+# quoted suggestion is never mistaken for the verdict.
+_BARE_VERDICT_PATTERNS = tuple(
+    (token, re.compile(r"^[*_`]{0,3}" + regex, re.IGNORECASE))
+    for token, regex in _VERDICT_TOKEN_REGEXES
 )
 
 
@@ -176,7 +193,7 @@ def _verdict_line(report: str) -> str | None:
     # No heading at all: accept a line that leads with a verdict token, e.g. a
     # bare "**INCOMPLETE** — ..." paragraph.
     for line in report.splitlines():
-        stripped = line.strip().lstrip("#*`_ ").strip()
+        stripped = line.strip()
         if stripped and _leading_token(stripped):
             return stripped
 
@@ -194,8 +211,11 @@ def _first_token(line: str) -> str | None:
 
 
 def _leading_token(line: str) -> str | None:
-    """Return the verdict token *line* starts with, if any."""
-    for token, pattern in _VERDICT_TOKEN_PATTERNS:
+    """Return the verdict token *line* leads with, if the line is a verdict.
+
+    Markdown structure (headings, list items, blockquotes) never qualifies.
+    """
+    for token, pattern in _BARE_VERDICT_PATTERNS:
         if pattern.match(line):
             return token
     return None

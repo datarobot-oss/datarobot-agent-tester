@@ -104,6 +104,38 @@ class TestUnparseable:
         assert parse_verdict("### Overall verdict\n") == "UNKNOWN"
 
 
+class TestFallbackIgnoresMarkdownStructure:
+    """Only a line that *is* the verdict may satisfy the no-heading fallback.
+
+    Headings and list items routinely start with a verdict word by coincidence
+    ("### Incomplete Windows guards"), which is the same false-positive class
+    the whole fix is about — it must not sneak back in via the fallback.
+    """
+
+    def test_gap_heading_starting_with_incomplete(self) -> None:
+        report = "# Skill Review\n\n### Incomplete Windows guards\n\nThe guards are partial.\n"
+        assert parse_verdict(report) == "UNKNOWN"
+
+    @pytest.mark.parametrize("bullet", ["*", "-", "+"])
+    def test_bullet_starting_with_a_verdict_word(self, bullet: str) -> None:
+        report = f"# Skill Review\n\n## Strengths\n\n{bullet} Good clear purpose statement.\n"
+        assert parse_verdict(report) == "UNKNOWN"
+
+    def test_blockquote_is_not_a_verdict(self) -> None:
+        # Reports quote suggested replacement text; it is not the verdict.
+        report = '# Review\n\n> INCOMPLETE — say this if the file is missing.\n'
+        assert parse_verdict(report) == "UNKNOWN"
+
+    def test_emphasised_bare_verdict_still_matches(self) -> None:
+        assert parse_verdict("Notes.\n\n**INCOMPLETE** — an agent would guess.\n") == "INCOMPLETE"
+        assert parse_verdict("Notes.\n\n_GOOD_ — clear throughout.\n") == "GOOD"
+
+    def test_bulleted_verdict_under_heading_still_matches(self) -> None:
+        # The heading path is unaffected: once the section is found, the line
+        # below it is the verdict even if the model bulleted it.
+        assert parse_verdict("### Overall verdict\n\n- NEEDS WORK — gaps.\n") == "NEEDS WORK"
+
+
 class TestVerdictPasses:
     @pytest.mark.parametrize(
         ("verdict", "expected"),
