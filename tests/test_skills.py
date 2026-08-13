@@ -5,7 +5,37 @@ from unittest.mock import patch
 
 import pytest
 
-from dr_agents_tester.skills import NOTES_SUFFIX, REPORT_SUFFIX, Skills
+from dr_agents_tester.pytest_plugin import parse_verdict
+from dr_agents_tester.skills import (
+    NOTES_SUFFIX,
+    REPORT_SUFFIX,
+    Skills,
+    _build_skill_test_prompt,
+)
+
+
+class TestVerdictFormatContract:
+    """The prompt must ask for a verdict that ``parse_verdict`` can read.
+
+    The judge previously drifted to `## Overall Verdict` because the prompt
+    never said the section was machine-read, which broke the consuming test.
+    """
+
+    def test_prompt_specifies_exact_heading(self) -> None:
+        prompt = _build_skill_test_prompt("demo", "# Demo skill\n")
+        assert "`### Overall verdict`" in prompt
+        assert "automated test" in prompt
+
+    def test_prompt_forbids_shifting_heading_levels(self) -> None:
+        prompt = _build_skill_test_prompt("demo", "# Demo skill\n")
+        assert "shift the report's heading levels" in prompt
+
+    def test_prompt_example_is_parseable(self) -> None:
+        # The example shown to the model must survive the parser that reads
+        # the report — otherwise we would be teaching an unparseable format.
+        prompt = _build_skill_test_prompt("demo", "# Demo skill\n")
+        example = prompt[prompt.rindex("### Overall verdict") :]
+        assert parse_verdict(example) == "NEEDS WORK"
 
 
 class TestSkillsTest:
