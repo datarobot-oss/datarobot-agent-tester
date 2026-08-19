@@ -60,6 +60,9 @@ dev = [
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+markers = [
+    "live: hits real services (opencode + DataRobot); skipped unless DRAT_LIVE=1",
+]
 
 [tool.ruff]
 line-length = 100

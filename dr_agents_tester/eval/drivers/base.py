@@ -116,8 +116,11 @@ class AgentDriver(Protocol):
     still run; an agent can fail after already having produced real state.
     """
 
-    name: str
-    version: str
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def version(self) -> str: ...
 
     def run(
         self,

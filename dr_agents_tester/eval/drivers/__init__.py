@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 from .base import AgentDriver, AgentRunStatus, RawTranscript, RunPaths
 from .fake import FakeDriver
+from .opencode import OpenCodeDriver
 
 __all__ = [
     "AgentDriver",
@@ -13,6 +14,7 @@ __all__ = [
     "RawTranscript",
     "RunPaths",
     "FakeDriver",
+    "OpenCodeDriver",
     "DRIVER_REGISTRY",
     "register_driver",
     "get_driver",
@@ -38,3 +40,4 @@ def get_driver(name: str) -> AgentDriver:
 
 
 register_driver("fake", FakeDriver)
+register_driver("opencode", OpenCodeDriver)

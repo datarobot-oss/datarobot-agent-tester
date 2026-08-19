@@ -66,7 +66,26 @@ dr-agent skills test --skill skills/commit.md     # evaluate a single skill
 dr-agent skills test --all                        # evaluate all skills in skills/
 dr-agent skills test --all --dir my_skills/       # evaluate skills in a custom directory
 dr-agent skills improve --skill skills/commit.md  # improve from saved report
+
+# Behavioral evaluation (real coding agent in a sandbox)
+dr-agent eval run-behavioral --scenarios tests/behavioral/journeys \
+  --skills-pr ./skills --n-runs 3                 # drive OpenCode through scenarios
+dr-agent eval sweep --prefix drat-                # dry-run sweep of leaked DR resources
+dr-agent eval sweep --prefix drat- --execute      # actually delete them
 ```
+
+### Behavioral evaluation
+
+`eval run-behavioral` drives a real coding agent (OpenCode v1, pinned in
+`eval/drivers/versions.py`, installed via `npm install -g opencode-ai@<version>`)
+through scenario YAMLs (`kind: behavioral`) in an isolated per-run sandbox, with
+skills installed the way users install them, and decides pass/fail with
+programmatic `success_checks` against the DataRobot API — the LLM judge never
+gates. Conditions compare `no_skill` / `skill_main` / `skill_pr` so a PR run
+answers "did this change beat main, and does either beat no skill at all?".
+Requires the `behavioral` extra (`pip install 'datarobot-agent-tester[behavioral]'`)
+for the DataRobot checks and teardown. Verified driver behavior is documented in
+[docs/opencode-driver-notes.md](docs/opencode-driver-notes.md).
 
 ### Typical AGENTS.md workflow
 
