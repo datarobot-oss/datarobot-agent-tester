@@ -15,7 +15,12 @@ from .models import (
     ScenarioBase,
 )
 from .report import generate_markdown_report
-from .stats import compute_condition_stats, compute_pairwise_comparisons
+from .stats import (
+    compute_condition_stats,
+    compute_outcome_stats,
+    compute_pairwise_comparisons,
+    outcome_metric,
+)
 
 
 class Evaluator:
@@ -107,7 +112,18 @@ class Evaluator:
         condition_types = [c.condition_type for c in self.conditions]
 
         stats = [compute_condition_stats(self.results, ct) for ct in condition_types]
-        comparisons = compute_pairwise_comparisons(self.results, condition_types)
+
+        has_outcomes = any(r.outcome is not None for r in self.results)
+        comparisons = compute_pairwise_comparisons(
+            self.results,
+            condition_types,
+            metric=outcome_metric if has_outcomes else None,
+        )
+        outcome_stats = (
+            [compute_outcome_stats(self.results, ct) for ct in condition_types]
+            if has_outcomes
+            else []
+        )
 
         return EvaluationReport(
             results=self.results,
@@ -116,6 +132,7 @@ class Evaluator:
             n_scenarios=len(scenarios),
             n_runs=self.n_runs,
             conditions_tested=condition_types,
+            outcome_stats=outcome_stats,
             backend_name=self.backend.name,
         )
 

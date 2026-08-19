@@ -3,8 +3,27 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
-from .models import ConditionStats, ConditionType, EvalResult, PairwiseComparison
+from .models import (
+    ConditionStats,
+    ConditionType,
+    EvalResult,
+    EvaluationReport,
+    OutcomeStats,
+    PairwiseComparison,
+)
+
+ResultMetric = Callable[[EvalResult], float]
+
+
+def _overall_metric(result: EvalResult) -> float:
+    return result.score_card.overall
+
+
+def outcome_metric(result: EvalResult) -> float:
+    """0/1 pass indicator — the pairwise metric for behavioral comparisons."""
+    return 1.0 if result.outcome is not None and result.outcome.outcome_pass else 0.0
 
 
 def compute_condition_stats(
@@ -48,17 +67,23 @@ def compute_condition_stats(
 def compute_pairwise_comparisons(
     results: list[EvalResult],
     conditions: list[ConditionType],
+    metric: ResultMetric | None = None,
 ) -> list[PairwiseComparison]:
     """Compute paired t-tests between all condition pairs.
 
     Pairs are matched on (scenario_id, run_number).  Uses scipy if
     available, otherwise falls back to a manual implementation.
+
+    Args:
+        metric: Value extracted from each result for comparison. Defaults to
+            the judge's overall score; behavioral comparisons pass
+            :func:`outcome_metric` (the 0/1 pass indicator).
     """
     comparisons: list[PairwiseComparison] = []
 
     for i, cond_a in enumerate(conditions):
         for cond_b in conditions[i + 1 :]:
-            comparison = _paired_comparison(results, cond_a, cond_b)
+            comparison = _paired_comparison(results, cond_a, cond_b, metric or _overall_metric)
             comparisons.append(comparison)
 
     return comparisons
@@ -68,18 +93,19 @@ def _paired_comparison(
     results: list[EvalResult],
     cond_a: ConditionType,
     cond_b: ConditionType,
+    metric: ResultMetric = _overall_metric,
 ) -> PairwiseComparison:
     """Run a paired t-test between two conditions."""
-    # Build lookup: (scenario_id, run_number) -> overall score
+    # Build lookup: (scenario_id, run_number) -> metric value
     scores_a: dict[tuple[str, int], float] = {}
     scores_b: dict[tuple[str, int], float] = {}
 
     for r in results:
         key = (r.scenario_id, r.run_number)
         if r.condition == cond_a:
-            scores_a[key] = r.score_card.overall
+            scores_a[key] = metric(r)
         elif r.condition == cond_b:
-            scores_b[key] = r.score_card.overall
+            scores_b[key] = metric(r)
 
     # Only use pairs where both conditions have a result
     common_keys = sorted(set(scores_a.keys()) & set(scores_b.keys()))
@@ -152,6 +178,82 @@ def _manual_paired_ttest(
         n_pairs=n,
         significant=p_val < 0.05,
     )
+
+
+def compute_outcome_stats(
+    results: list[EvalResult],
+    condition: ConditionType,
+) -> OutcomeStats:
+    """Aggregate behavioral outcomes and efficiency metrics for one condition.
+
+    Only results carrying an ``outcome`` participate; ``k`` is derived from the
+    highest run number observed. Efficiency means skip runs whose driver did
+    not report the metric.
+    """
+    filtered = [r for r in results if r.condition == condition and r.outcome is not None]
+    n = len(filtered)
+    if n == 0:
+        return OutcomeStats(condition=condition)
+
+    passes = [r for r in filtered if r.outcome is not None and r.outcome.outcome_pass]
+
+    by_scenario: dict[str, list[EvalResult]] = {}
+    for r in filtered:
+        by_scenario.setdefault(r.scenario_id, []).append(r)
+    scenarios_with_pass = sum(
+        1
+        for runs in by_scenario.values()
+        if any(r.outcome is not None and r.outcome.outcome_pass for r in runs)
+    )
+
+    def _traj_mean(attr: str) -> float:
+        values = [
+            float(v)
+            for r in filtered
+            if r.trajectory is not None and (v := getattr(r.trajectory, attr)) is not None
+        ]
+        return _mean(values)
+
+    triggered = [
+        r for r in filtered if r.trajectory is not None and r.trajectory.skill_triggered is not None
+    ]
+    trigger_rate = (
+        _mean(
+            [
+                1.0 if r.trajectory is not None and r.trajectory.skill_triggered else 0.0
+                for r in triggered
+            ]
+        )
+        if triggered
+        else 0.0
+    )
+
+    return OutcomeStats(
+        condition=condition,
+        n_results=n,
+        k=max(r.run_number for r in filtered),
+        pass_rate=round(len(passes) / n, 4),
+        pass_at_k=round(scenarios_with_pass / len(by_scenario), 4),
+        mean_turns=_traj_mean("num_turns"),
+        mean_tool_calls=_traj_mean("num_tool_calls"),
+        mean_errors=_traj_mean("num_errors"),
+        mean_total_tokens=_traj_mean("total_tokens"),
+        mean_wall_seconds=_traj_mean("wall_seconds"),
+        skill_trigger_rate=trigger_rate,
+    )
+
+
+def outcome_pass_rate(report: EvaluationReport, condition: ConditionType) -> float | None:
+    """Pass rate for one condition, or None when it has no behavioral results.
+
+    The CI gate consumes this: with ``--fail-under-pass-rate`` unset the run
+    stays advisory regardless of the value.
+    """
+    filtered = [r for r in report.results if r.condition == condition and r.outcome is not None]
+    if not filtered:
+        return None
+    passed = sum(1 for r in filtered if r.outcome is not None and r.outcome.outcome_pass)
+    return round(passed / len(filtered), 4)
 
 
 # ---------------------------------------------------------------------------
