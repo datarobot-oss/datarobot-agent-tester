@@ -67,7 +67,7 @@ def _mock_score_response() -> str:
 
 
 class TestEvaluator:
-    @patch("dr_agents_tester.eval.runner.call_llm_with_usage")
+    @patch("dr_agents_tester.eval.backends.plan.call_llm_with_usage")
     def test_run_single_condition(
         self,
         mock_llm: object,
@@ -96,7 +96,7 @@ class TestEvaluator:
         assert report.n_scenarios == 1
         assert report.n_runs == 1
 
-    @patch("dr_agents_tester.eval.runner.call_llm_with_usage")
+    @patch("dr_agents_tester.eval.backends.plan.call_llm_with_usage")
     def test_run_multiple_conditions(
         self,
         mock_llm: object,
@@ -131,7 +131,7 @@ class TestEvaluator:
         assert len(report.condition_stats) == 2
         assert len(report.pairwise_comparisons) == 1
 
-    @patch("dr_agents_tester.eval.runner.call_llm_with_usage")
+    @patch("dr_agents_tester.eval.backends.plan.call_llm_with_usage")
     def test_save_report(
         self,
         mock_llm: object,
@@ -165,7 +165,7 @@ class TestEvaluator:
         data = json.loads(json_path.read_text())
         assert data["n_scenarios"] == 1
 
-    @patch("dr_agents_tester.eval.runner.call_llm_with_usage")
+    @patch("dr_agents_tester.eval.backends.plan.call_llm_with_usage")
     def test_empty_scenarios(
         self,
         mock_llm: object,
