@@ -7,7 +7,7 @@ packages = ["dr_agents_tester"]
 
 [project]
 name = "datarobot-agent-tester"
-version = "0.1.0"
+version = "0.2.0"
 description = "Generate, test, and improve AGENTS.md files and AI coding skills via the DataRobot LLM Gateway"
 readme = "README.md"
 license = "Apache-2.0"
@@ -33,6 +33,11 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0",
 ]
+
+[project.optional-dependencies]
+# dr_* success checks, resource teardown, and the live golden-journey smoke.
+# The core wheel stays lean; behavioral runs need the DataRobot SDK.
+behavioral = ["datarobot>=3.6,<4"]
 
 [project.urls]
 Homepage = "https://github.com/datarobot-oss/datarobot-agent-tester"
