@@ -84,8 +84,11 @@ programmatic `success_checks` against the DataRobot API — the LLM judge never
 gates. Conditions compare `no_skill` / `skill_main` / `skill_pr` so a PR run
 answers "did this change beat main, and does either beat no skill at all?".
 Requires the `behavioral` extra (`pip install 'datarobot-agent-tester[behavioral]'`)
-for the DataRobot checks and teardown. Verified driver behavior is documented in
-[docs/opencode-driver-notes.md](docs/opencode-driver-notes.md).
+for the DataRobot checks and teardown.
+
+**Full guide — running evaluations and inspecting trajectories:**
+[docs/behavioral-evaluation.md](docs/behavioral-evaluation.md). Verified driver
+behavior is documented in [docs/opencode-driver-notes.md](docs/opencode-driver-notes.md).
 
 ### Typical AGENTS.md workflow
 
