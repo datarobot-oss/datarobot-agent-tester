@@ -106,6 +106,85 @@ scenarios:
         assert len(load_behavioral_scenarios(tmp_path, Difficulty.MEDIUM)) == 1
 
 
+REQUIRES_ENV_YAML = """\
+scenarios:
+  - id: fixture-1
+    kind: behavioral
+    name: Uses a fixture deployment
+    difficulty: easy
+    prompt: Score against deployment {env:BEHAVIORAL_FIXTURE_DEPLOYMENT_ID}.
+    skills_under_test: [datarobot-predictions]
+    requires_env: [BEHAVIORAL_FIXTURE_DEPLOYMENT_ID]
+    success_checks:
+      - type: file_exists
+        path: out.csv
+"""
+
+
+class TestRequiresEnv:
+    def test_happy_path(self, tmp_path: Path) -> None:
+        (tmp_path / "f.yaml").write_text(REQUIRES_ENV_YAML)
+        s = load_behavioral_scenarios(tmp_path)[0]
+        assert s.requires_env == ["BEHAVIORAL_FIXTURE_DEPLOYMENT_ID"]
+
+    def test_reference_in_check_params_counts(self, tmp_path: Path) -> None:
+        (tmp_path / "f.yaml").write_text(
+            REQUIRES_ENV_YAML.replace(
+                "prompt: Score against deployment {env:BEHAVIORAL_FIXTURE_DEPLOYMENT_ID}.",
+                "prompt: Score it.",
+            ).replace(
+                "path: out.csv",
+                'path: "out-{env:BEHAVIORAL_FIXTURE_DEPLOYMENT_ID}.csv"',
+            )
+        )
+        assert load_behavioral_scenarios(tmp_path)[0].requires_env == [
+            "BEHAVIORAL_FIXTURE_DEPLOYMENT_ID"
+        ]
+
+    def test_undeclared_reference_rejected(self, tmp_path: Path) -> None:
+        (tmp_path / "f.yaml").write_text(
+            REQUIRES_ENV_YAML.replace("    requires_env: [BEHAVIORAL_FIXTURE_DEPLOYMENT_ID]\n", "")
+        )
+        with pytest.raises(ValueError, match="not declared in requires_env"):
+            load_behavioral_scenarios(tmp_path)
+
+    def test_unused_declaration_rejected(self, tmp_path: Path) -> None:
+        (tmp_path / "f.yaml").write_text(
+            REQUIRES_ENV_YAML.replace(
+                "requires_env: [BEHAVIORAL_FIXTURE_DEPLOYMENT_ID]",
+                "requires_env: [BEHAVIORAL_FIXTURE_DEPLOYMENT_ID, BEHAVIORAL_UNUSED]",
+            )
+        )
+        with pytest.raises(ValueError, match="never referenced"):
+            load_behavioral_scenarios(tmp_path)
+
+    def test_disallowed_name_rejected(self, tmp_path: Path) -> None:
+        (tmp_path / "f.yaml").write_text(
+            REQUIRES_ENV_YAML.replace("BEHAVIORAL_FIXTURE_DEPLOYMENT_ID", "DATAROBOT_API_TOKEN")
+        )
+        with pytest.raises(ValueError, match="never credentials"):
+            load_behavioral_scenarios(tmp_path)
+
+
+class TestSubdirDiscovery:
+    def test_behavioral_scans_one_subdir_level(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "datarobot-predictions"
+        skill_dir.mkdir()
+        (skill_dir / "template.yaml").write_text(
+            BEHAVIORAL_SCENARIO_YAML.replace("golden-1", "sub-1")
+        )
+        (tmp_path / "top.yaml").write_text(BEHAVIORAL_SCENARIO_YAML)
+
+        ids = [s.id for s in load_behavioral_scenarios(tmp_path)]
+        assert sorted(ids) == ["golden-1", "sub-1"]
+
+    def test_plan_load_stays_flat(self, tmp_path: Path) -> None:
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "p.yaml").write_text(PLAN_SCENARIO_YAML)
+        assert load_scenarios(tmp_path) == []
+
+
 class TestKindDiscrimination:
     def test_mixed_file(self, tmp_path: Path) -> None:
         (tmp_path / "mixed.yaml").write_text(

@@ -59,6 +59,7 @@ def _behavioral_result(passed: bool = True, run_number: int = 1) -> EvalResult:
             num_tool_calls=9,
             num_errors=1,
             skill_triggered=True,
+            skill_triggered_expected=True,
             skills_used=["datarobot-model-training"],
             skill_first_turn=1,
         ),
@@ -110,6 +111,7 @@ class TestBehavioralRoundTrip:
                     pass_at_k=1.0,
                     mean_turns=4.0,
                     skill_trigger_rate=1.0,
+                    expected_skill_trigger_rate=0.5,
                 )
             ],
             backend_name="agent",
@@ -121,6 +123,7 @@ class TestBehavioralRoundTrip:
         assert stats.condition == ConditionType.SKILL_PR
         assert stats.pass_rate == 0.6667
         assert stats.pass_at_k == 1.0
+        assert stats.expected_skill_trigger_rate == 0.5
 
         r = loaded.results[0]
         assert r.outcome is not None and r.outcome.outcome_pass is False
@@ -133,6 +136,7 @@ class TestBehavioralRoundTrip:
         assert r.trajectory.wall_seconds == 120.5
         assert r.trajectory.num_tool_calls == 9
         assert r.trajectory.skill_triggered is True
+        assert r.trajectory.skill_triggered_expected is True
         assert r.trajectory.skills_used == ["datarobot-model-training"]
         # Unreported driver metrics stay None through the round trip
         assert r.trajectory.cost is None
@@ -149,7 +153,10 @@ class TestBehavioralMarkdown:
 
     def test_behavioral_report_sections(self) -> None:
         report = EvaluationReport(
-            results=[_behavioral_result(passed=True), _behavioral_result(passed=False, run_number=2)],
+            results=[
+                _behavioral_result(passed=True),
+                _behavioral_result(passed=False, run_number=2),
+            ],
             outcome_stats=[
                 OutcomeStats(
                     condition=ConditionType.SKILL_PR,
@@ -163,6 +170,7 @@ class TestBehavioralMarkdown:
                     mean_total_tokens=5000.0,
                     mean_wall_seconds=120.0,
                     skill_trigger_rate=1.0,
+                    expected_skill_trigger_rate=1.0,
                 )
             ],
             backend_name="agent",
@@ -170,6 +178,7 @@ class TestBehavioralMarkdown:
         md = generate_markdown_report(report)
         assert "# Skill Behavioral Evaluation Report" in md
         assert "## Behavioral Outcomes" in md
+        assert "Expected skill" in md
         assert "## Behavioral Per-Scenario Results" in md
         assert "PASS" in md and "FAIL" in md
         assert "file_exists: no file matching" in md

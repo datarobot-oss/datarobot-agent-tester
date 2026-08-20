@@ -21,6 +21,9 @@ _INSTALL_HINT = (
     "Install with: pip install 'datarobot-agent-tester[behavioral]'"
 )
 
+#: Seam for polling checks; tests replace this to avoid real sleeps.
+_sleep = time.sleep
+
 
 def _dr_module(ctx: CheckContext) -> Any:
     """Return the datarobot module (or an injected fake) with a client configured."""
@@ -49,8 +52,19 @@ def _timed(
 class DrProjectExistsCheck(OutcomeCheck):
     """Assert a DataRobot project whose name contains a substring exists.
 
+    With ``stage`` set, at least one matched project must have reached that
+    lifecycle stage (e.g. ``modeling`` — the signal that autopilot was
+    started, without waiting for it to finish). ``deadline_seconds`` keeps
+    re-checking until the deadline, for state the agent set in motion just
+    before exiting.
+
     Params:
         name_contains: substring to match (typically ``{run_id}``).
+        stage: required project stage; matched projects are refreshed via
+            ``Project.get`` because list results may carry stale/partial state.
+        deadline_seconds: keep polling until this many seconds have passed
+            (default 0 — a single attempt).
+        poll_seconds: seconds between polling attempts (default 10).
     """
 
     type_name = "dr_project_exists"
@@ -58,12 +72,66 @@ class DrProjectExistsCheck(OutcomeCheck):
     def run(self, ctx: CheckContext) -> CheckResult:
         start = time.monotonic()
         needle = str(self.params.get("name_contains", ctx.run_id))
+        wanted_stage = self.params.get("stage")
+        deadline_seconds = param_int(self.params, "deadline_seconds", 0)
+        poll_seconds = param_int(self.params, "poll_seconds", 10)
         dr = _dr_module(ctx)
-        projects = dr.Project.list(search_params={"project_name": needle})
-        if projects:
-            names = ", ".join(f"{p.project_name} ({p.id})" for p in projects[:3])
-            return _timed(self, start, True, f"{len(projects)} project(s) matched: {names}")
-        return _timed(self, start, False, f"no project name contains {needle!r}")
+
+        deadline = start + deadline_seconds
+        attempts = 0
+        last_state = f"no project name contains {needle!r}"
+        while True:
+            attempts += 1
+            projects = dr.Project.list(search_params={"project_name": needle})
+            if projects:
+                if wanted_stage is None:
+                    names = ", ".join(f"{p.project_name} ({p.id})" for p in projects[:3])
+                    return _timed(self, start, True, f"{len(projects)} project(s) matched: {names}")
+                stages: list[str] = []
+                for p in projects[:5]:
+                    full = dr.Project.get(p.id)
+                    stage = str(getattr(full, "stage", "") or "")
+                    if stage == str(wanted_stage):
+                        return _timed(
+                            self,
+                            start,
+                            True,
+                            f"{full.project_name} ({full.id}) reached stage {stage!r}",
+                        )
+                    stages.append(f"{p.project_name}: {stage!r}")
+                last_state = (
+                    f"matched project(s) not at stage {wanted_stage!r}: {'; '.join(stages)}"
+                )
+            if time.monotonic() >= deadline:
+                break
+            _sleep(poll_seconds)
+
+        suffix = f" (after {attempts} attempt(s) over {deadline_seconds}s)" if attempts > 1 else ""
+        return _timed(self, start, False, last_state + suffix)
+
+
+class DrUseCaseExistsCheck(OutcomeCheck):
+    """Assert a DataRobot Use Case whose name contains a substring exists.
+
+    The training skill mandates a Use-Case-first flow; this check makes that
+    linkage a hard outcome instead of a rubric note. Filtering is client-side
+    (``UseCase.list`` has no server-side name search), mirroring teardown.
+
+    Params:
+        name_contains: substring to match (typically ``{run_id}``).
+    """
+
+    type_name = "dr_use_case_exists"
+
+    def run(self, ctx: CheckContext) -> CheckResult:
+        start = time.monotonic()
+        needle = str(self.params.get("name_contains", ctx.run_id))
+        dr = _dr_module(ctx)
+        use_cases = [u for u in dr.UseCase.list() if needle in (getattr(u, "name", "") or "")]
+        if use_cases:
+            names = ", ".join(f"{u.name} ({u.id})" for u in use_cases[:3])
+            return _timed(self, start, True, f"{len(use_cases)} use case(s) matched: {names}")
+        return _timed(self, start, False, f"no use case name contains {needle!r}")
 
 
 class DrDeploymentHealthyCheck(OutcomeCheck):

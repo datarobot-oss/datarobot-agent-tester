@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from ..config import Config
@@ -28,7 +29,9 @@ class Evaluator:
 
     Args:
         config: LLM gateway configuration.
-        scenarios_dir: Directory containing scenario YAML files.
+        scenarios_dir: Directory (or sequence of directories) containing
+            scenario YAML files; scenario ids must be unique across all of
+            them.
         repo_tree_path: Path to the repo file tree text file (required only
             for the default plan backend).
         conditions: List of conditions to evaluate.
@@ -43,7 +46,7 @@ class Evaluator:
     def __init__(
         self,
         config: Config,
-        scenarios_dir: Path,
+        scenarios_dir: Path | Sequence[Path],
         repo_tree_path: Path | None = None,
         conditions: list[EvalCondition] | None = None,
         n_runs: int = 5,
@@ -57,7 +60,9 @@ class Evaluator:
             backend = PlanBackend(config=config, repo_tree=repo_tree_path.read_text().strip())
         self.backend = backend
         self.config = config
-        self.scenarios_dir = scenarios_dir
+        self.scenarios_dirs: list[Path] = (
+            [scenarios_dir] if isinstance(scenarios_dir, Path) else list(scenarios_dir)
+        )
         self.conditions = conditions or []
         self.n_runs = n_runs
         self.difficulty_filter = difficulty_filter
@@ -70,7 +75,18 @@ class Evaluator:
         Iterates over all scenarios × conditions × runs, delegating each cell
         to the execution backend.
         """
-        scenarios = self.backend.load_scenarios(self.scenarios_dir, self.difficulty_filter)
+        scenarios: list[ScenarioBase] = []
+        for directory in self.scenarios_dirs:
+            scenarios.extend(self.backend.load_scenarios(directory, self.difficulty_filter))
+
+        seen: dict[str, int] = {}
+        for s in scenarios:
+            seen[s.id] = seen.get(s.id, 0) + 1
+        duplicates = sorted(sid for sid, n in seen.items() if n > 1)
+        if duplicates:
+            raise ValueError(
+                f"Duplicate scenario id(s) across --scenarios directories: {', '.join(duplicates)}"
+            )
 
         if not scenarios:
             print("No scenarios found.", file=sys.stderr)

@@ -18,10 +18,18 @@ from pathlib import Path
 from typing import Any
 
 from .models import BehavioralScenario, CheckSpec, Difficulty, FixtureSpec, Scenario
+from .templating import ALLOWED_ENV_NAME_RE, find_env_tokens
 
 
-def _load_raw(scenarios_dir: Path) -> list[tuple[dict[str, Any], Path]]:
-    """Shared file walk: yield every scenario dict with its source file."""
+def _load_raw(
+    scenarios_dir: Path, include_subdirs: bool = False
+) -> list[tuple[dict[str, Any], Path]]:
+    """Shared file walk: yield every scenario dict with its source file.
+
+    With ``include_subdirs``, one subdirectory level is also scanned — the
+    ``scenarios/<skill-name>/*.yaml`` layout the skills repo uses for
+    single-skill behavioral scenarios.
+    """
     try:
         import yaml  # type: ignore[import-untyped]
     except ImportError:
@@ -32,8 +40,12 @@ def _load_raw(scenarios_dir: Path) -> list[tuple[dict[str, Any], Path]]:
     if not scenarios_dir.is_dir():
         raise FileNotFoundError(f"Scenarios directory not found: {scenarios_dir}")
 
+    yaml_paths = list(scenarios_dir.glob("*.yaml"))
+    if include_subdirs:
+        yaml_paths += scenarios_dir.glob("*/*.yaml")
+
     entries: list[tuple[dict[str, Any], Path]] = []
-    for yaml_path in sorted(scenarios_dir.glob("*.yaml")):
+    for yaml_path in sorted(yaml_paths):
         if yaml_path.stem == "repo_tree":
             continue
 
@@ -86,10 +98,11 @@ def load_behavioral_scenarios(
 ) -> list[BehavioralScenario]:
     """Load behavioral (schema v2) scenarios from YAML files in a directory.
 
-    Entries without ``kind: behavioral`` are skipped.
+    Entries without ``kind: behavioral`` are skipped. One subdirectory level
+    is scanned too (the ``scenarios/<skill-name>/`` layout).
     """
     scenarios: list[BehavioralScenario] = []
-    for item, yaml_path in _load_raw(scenarios_dir):
+    for item, yaml_path in _load_raw(scenarios_dir, include_subdirs=True):
         if _kind(item) != "behavioral":
             continue
         scenario = _parse_behavioral(item, yaml_path)
@@ -198,7 +211,7 @@ def _parse_behavioral(data: dict[str, Any], source: Path) -> BehavioralScenario:
             f"timeout_minutes must be positive, got {timeout_minutes}"
         )
 
-    return BehavioralScenario(
+    scenario = BehavioralScenario(
         id=str(data["id"]),
         name=str(data["name"]),
         difficulty=difficulty,
@@ -207,11 +220,54 @@ def _parse_behavioral(data: dict[str, Any], source: Path) -> BehavioralScenario:
         success_checks=checks,
         fixtures=_parse_fixtures(data.get("fixtures", []), data["id"], source),
         env={str(k): str(v) for k, v in (data.get("env") or {}).items()},
+        requires_env=[str(v) for v in (data.get("requires_env") or [])],
         rubric=str(data.get("rubric", "")),
         common_pitfalls=[str(p) for p in data.get("common_pitfalls", [])],
         timeout_minutes=timeout_minutes,
         source_dir=source.parent,
     )
+    _validate_env_tokens(scenario, source)
+    return scenario
+
+
+def _validate_env_tokens(scenario: BehavioralScenario, source: Path) -> None:
+    """Cross-check ``requires_env`` declarations against ``{env:VAR}`` references.
+
+    Purely syntactic so YAML validation stays offline; whether the variables
+    are actually set is enforced at run start. Declared-but-unreferenced and
+    referenced-but-undeclared are both errors — each is how a typo hides.
+    """
+    where = f"Behavioral scenario {scenario.id!r} in {source.name}"
+
+    bad_names = [v for v in scenario.requires_env if not ALLOWED_ENV_NAME_RE.match(v)]
+    if bad_names:
+        raise ValueError(
+            f"{where}: requires_env entries must match {ALLOWED_ENV_NAME_RE.pattern!r} "
+            f"(scenarios may only template fixture/run variables, never credentials): "
+            f"{', '.join(bad_names)}"
+        )
+
+    referenced = find_env_tokens(scenario.prompt)
+    for value in scenario.env.values():
+        referenced |= find_env_tokens(value)
+    for check in scenario.success_checks:
+        for value in check.params.values():
+            if isinstance(value, str):
+                referenced |= find_env_tokens(value)
+
+    declared = set(scenario.requires_env)
+    undeclared = referenced - declared
+    if undeclared:
+        raise ValueError(
+            f"{where}: {{env:...}} references not declared in requires_env: "
+            f"{', '.join(sorted(undeclared))}"
+        )
+    unused = declared - referenced
+    if unused:
+        raise ValueError(
+            f"{where}: requires_env declares variables never referenced as "
+            f"{{env:...}} tokens: {', '.join(sorted(unused))}"
+        )
 
 
 def _parse_checks(

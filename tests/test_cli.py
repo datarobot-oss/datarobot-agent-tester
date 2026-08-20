@@ -10,7 +10,7 @@ class TestEvalRunBehavioralParser:
         args = build_parser().parse_args(
             ["eval", "run-behavioral", "--scenarios", "tests/behavioral"]
         )
-        assert args.scenarios == "tests/behavioral"
+        assert args.scenarios == ["tests/behavioral"]
         assert args.driver == "opencode"
         assert args.n_runs == 3
         assert args.work_dir == ".behavioral-runs"
@@ -54,6 +54,19 @@ class TestEvalRunBehavioralParser:
         assert args.conditions == "skill_pr"
         assert args.fail_under_pass_rate == 0.5
         assert args.keep_resources is True
+
+    def test_scenarios_repeatable(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "eval",
+                "run-behavioral",
+                "--scenarios",
+                "tests/behavioral/journeys",
+                "--scenarios",
+                "tests/behavioral/scenarios",
+            ]
+        )
+        assert args.scenarios == ["tests/behavioral/journeys", "tests/behavioral/scenarios"]
 
     def test_scenarios_required(self) -> None:
         with pytest.raises(SystemExit):

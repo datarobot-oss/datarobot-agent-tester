@@ -18,6 +18,7 @@ from typing import IO, Protocol
 from ..config import Config
 from .drivers.base import RunPaths
 from .models import BehavioralScenario
+from .templating import substitute_env_tokens
 
 
 class Sandbox(Protocol):
@@ -113,9 +114,19 @@ RESOURCE_PREFIX_EPILOGUE = (
 )
 
 
-def render_prompt(scenario: BehavioralScenario, run_id: str) -> str:
-    """Template {run_id} into the prompt and append the resource-prefix epilogue."""
+def render_prompt(
+    scenario: BehavioralScenario,
+    run_id: str,
+    host_env: Mapping[str, str] | None = None,
+) -> str:
+    """Template {run_id}/{env:VAR} into the prompt and append the prefix epilogue.
+
+    ``{env:VAR}`` values (pre-provisioned fixture-resource ids) come from the
+    *host* environment — they are substituted into the prompt text rather than
+    exposed through the sandbox env allowlist.
+    """
     prompt = scenario.prompt.replace("{run_id}", run_id)
+    prompt = substitute_env_tokens(prompt, host_env or {})
     prefix = scenario.env.get("resource_prefix", "").replace("{run_id}", run_id)
     if prefix:
         prompt += RESOURCE_PREFIX_EPILOGUE.format(prefix=prefix)

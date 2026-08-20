@@ -214,19 +214,20 @@ def compute_outcome_stats(
         ]
         return _mean(values)
 
-    triggered = [
-        r for r in filtered if r.trajectory is not None and r.trajectory.skill_triggered is not None
-    ]
-    trigger_rate = (
-        _mean(
+    def _bool_rate(attr: str) -> float:
+        reporting = [
+            r
+            for r in filtered
+            if r.trajectory is not None and getattr(r.trajectory, attr) is not None
+        ]
+        if not reporting:
+            return 0.0
+        return _mean(
             [
-                1.0 if r.trajectory is not None and r.trajectory.skill_triggered else 0.0
-                for r in triggered
+                1.0 if r.trajectory is not None and getattr(r.trajectory, attr) else 0.0
+                for r in reporting
             ]
         )
-        if triggered
-        else 0.0
-    )
 
     return OutcomeStats(
         condition=condition,
@@ -239,7 +240,8 @@ def compute_outcome_stats(
         mean_errors=_traj_mean("num_errors"),
         mean_total_tokens=_traj_mean("total_tokens"),
         mean_wall_seconds=_traj_mean("wall_seconds"),
-        skill_trigger_rate=trigger_rate,
+        skill_trigger_rate=_bool_rate("skill_triggered"),
+        expected_skill_trigger_rate=_bool_rate("skill_triggered_expected"),
     )
 
 

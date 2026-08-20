@@ -84,6 +84,9 @@ class BehavioralScenario(ScenarioBase):
     success_checks: list[CheckSpec]
     fixtures: list[FixtureSpec] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
+    #: Host env vars this scenario needs (pre-provisioned fixture-resource
+    #: ids), referenced as ``{env:VAR}`` tokens in prompt/env/check params.
+    requires_env: list[str] = field(default_factory=list)
     rubric: str = ""
     common_pitfalls: list[str] = field(default_factory=list)
     timeout_minutes: int = 30
@@ -159,6 +162,10 @@ class TrajectoryMetrics:
     num_errors: int | None = None
     num_retries: int | None = None
     skill_triggered: bool | None = None
+    #: Whether any triggered skill is one the scenario declares under test —
+    #: distinguishes "the right skill fired" from "some skill fired" on
+    #: trigger-collision scenarios. None when trigger detection is unavailable.
+    skill_triggered_expected: bool | None = None
     skills_used: list[str] = field(default_factory=list)
     skill_first_turn: int | None = None
     num_unknown_events: int = 0
@@ -180,6 +187,7 @@ class TrajectoryMetrics:
                 "num_errors",
                 "num_retries",
                 "skill_triggered",
+                "skill_triggered_expected",
                 "skill_first_turn",
             )
             if getattr(self, name) is not None
@@ -254,6 +262,7 @@ class OutcomeStats:
     mean_total_tokens: float = 0.0
     mean_wall_seconds: float = 0.0
     skill_trigger_rate: float = 0.0
+    expected_skill_trigger_rate: float = 0.0
 
 
 @dataclass

@@ -234,9 +234,7 @@ class TestAgentBackendExecute:
             work_dir=tmp_path / "runs",
         )
         ctx = RunContext(run_number=2, run_id="r-artifacts")
-        backend.execute(
-            scenario, EvalCondition(condition_type=ConditionType.NO_SKILL), ctx
-        )
+        backend.execute(scenario, EvalCondition(condition_type=ConditionType.NO_SKILL), ctx)
         run_dir = tmp_path / "runs" / ctx.run_id
         meta = json.loads((run_dir / "meta.json").read_text())
         assert meta["run_id"] == ctx.run_id
@@ -246,6 +244,141 @@ class TestAgentBackendExecute:
         checks = json.loads((run_dir / "checks.json").read_text())
         assert checks["outcome_pass"] is True
 
+    def test_skill_triggered_expected_true_for_declared_skill(
+        self, fake_config: Config, scenario: BehavioralScenario, tmp_path: Path
+    ) -> None:
+        backend = AgentBackend(
+            config=fake_config,
+            driver=FakeDriver(events=_events(), files_to_create={"predictions.csv": "p\n1\n"}),
+            work_dir=tmp_path / "runs",
+        )
+        result = backend.execute(
+            scenario,
+            EvalCondition(condition_type=ConditionType.NO_SKILL),
+            RunContext(run_number=1, run_id="r-expected"),
+        )
+        assert result.trajectory is not None
+        assert result.trajectory.skill_triggered is True
+        assert result.trajectory.skill_triggered_expected is True
+
+    def test_skill_triggered_expected_false_for_collision(
+        self, fake_config: Config, scenario: BehavioralScenario, tmp_path: Path
+    ) -> None:
+        wrong_skill_events = [
+            TrajectoryEvent(kind=EventKind.TURN_START, seq=0, turn=1),
+            TrajectoryEvent(
+                kind=EventKind.SKILL_TRIGGERED, seq=1, turn=1, name="datarobot-model-explainability"
+            ),
+            TrajectoryEvent(kind=EventKind.TURN_FINISH, seq=2, turn=1),
+        ]
+        backend = AgentBackend(
+            config=fake_config,
+            driver=FakeDriver(
+                events=wrong_skill_events, files_to_create={"predictions.csv": "p\n1\n"}
+            ),
+            work_dir=tmp_path / "runs",
+        )
+        result = backend.execute(
+            scenario,
+            EvalCondition(condition_type=ConditionType.NO_SKILL),
+            RunContext(run_number=1, run_id="r-collision"),
+        )
+        assert result.trajectory is not None
+        assert result.trajectory.skill_triggered is True
+        assert result.trajectory.skill_triggered_expected is False
+
+
+class TestHostEnvInjection:
+    def _fixture_scenario(self, tmp_path: Path) -> BehavioralScenario:
+        return BehavioralScenario(
+            id="fixture-scenario",
+            name="Fixture",
+            difficulty=Difficulty.EASY,
+            prompt="Score against deployment {env:BEHAVIORAL_FIXTURE_DEPLOYMENT_ID}.",
+            skills_under_test=["datarobot-predictions"],
+            success_checks=[
+                CheckSpec(
+                    type="file_exists",
+                    params={"path": "out-{env:BEHAVIORAL_FIXTURE_DEPLOYMENT_ID}.csv"},
+                )
+            ],
+            env={"deployment_id": "{env:BEHAVIORAL_FIXTURE_DEPLOYMENT_ID}"},
+            requires_env=["BEHAVIORAL_FIXTURE_DEPLOYMENT_ID"],
+            source_dir=tmp_path,
+        )
+
+    def test_tokens_substituted_into_prompt_env_and_checks(
+        self, fake_config: Config, tmp_path: Path
+    ) -> None:
+        driver = FakeDriver(files_to_create={"out-dep-42.csv": "data\n"})
+        backend = AgentBackend(
+            config=fake_config,
+            driver=driver,
+            work_dir=tmp_path / "runs",
+            host_env={"BEHAVIORAL_FIXTURE_DEPLOYMENT_ID": "dep-42"},
+        )
+        result = backend.execute(
+            self._fixture_scenario(tmp_path),
+            EvalCondition(condition_type=ConditionType.NO_SKILL),
+            RunContext(run_number=1, run_id="r-hostenv"),
+        )
+        call = driver.calls[0]
+        assert "deployment dep-42." in call.prompt
+        assert call.env["deployment_id"] == "dep-42"
+        assert result.outcome is not None and result.outcome.outcome_pass
+
+    def test_load_scenarios_aborts_on_missing_fixture_vars(
+        self, fake_config: Config, tmp_path: Path
+    ) -> None:
+        scenarios_dir = tmp_path / "scenarios"
+        scenarios_dir.mkdir()
+        (scenarios_dir / "f.yaml").write_text(
+            """\
+scenarios:
+  - id: fixture-needy
+    kind: behavioral
+    name: Needs a fixture
+    difficulty: easy
+    prompt: Use deployment {env:BEHAVIORAL_FIXTURE_DEPLOYMENT_ID}.
+    skills_under_test: [datarobot-predictions]
+    requires_env: [BEHAVIORAL_FIXTURE_DEPLOYMENT_ID]
+    success_checks: [{type: file_exists, path: out.csv}]
+"""
+        )
+        backend = AgentBackend(
+            config=fake_config, driver=FakeDriver(), work_dir=tmp_path / "runs", host_env={}
+        )
+        with pytest.raises(ValueError, match="fixture-needy: BEHAVIORAL_FIXTURE_DEPLOYMENT_ID"):
+            backend.load_scenarios(scenarios_dir, None)
+
+    def test_load_scenarios_passes_when_vars_present(
+        self, fake_config: Config, tmp_path: Path
+    ) -> None:
+        scenarios_dir = tmp_path / "scenarios"
+        scenarios_dir.mkdir()
+        (scenarios_dir / "f.yaml").write_text(
+            """\
+scenarios:
+  - id: fixture-ok
+    kind: behavioral
+    name: Needs a fixture
+    difficulty: easy
+    prompt: Use deployment {env:BEHAVIORAL_FIXTURE_DEPLOYMENT_ID}.
+    skills_under_test: [datarobot-predictions]
+    requires_env: [BEHAVIORAL_FIXTURE_DEPLOYMENT_ID]
+    success_checks: [{type: file_exists, path: out.csv}]
+"""
+        )
+        backend = AgentBackend(
+            config=fake_config,
+            driver=FakeDriver(),
+            work_dir=tmp_path / "runs",
+            host_env={"BEHAVIORAL_FIXTURE_DEPLOYMENT_ID": "dep-42"},
+        )
+        assert len(backend.load_scenarios(scenarios_dir, None)) == 1
+
+
+class TestRejectsPlanScenario:
     def test_rejects_plan_scenario(self, fake_config: Config, tmp_path: Path) -> None:
         plan = Scenario(
             id="p",
@@ -258,9 +391,7 @@ class TestAgentBackendExecute:
             common_pitfalls=[],
             acceptance_criteria=[],
         )
-        backend = AgentBackend(
-            config=fake_config, driver=FakeDriver(), work_dir=tmp_path / "runs"
-        )
+        backend = AgentBackend(config=fake_config, driver=FakeDriver(), work_dir=tmp_path / "runs")
         with pytest.raises(TypeError, match="behavioral scenarios"):
             backend.execute(
                 plan,

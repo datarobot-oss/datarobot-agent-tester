@@ -67,11 +67,23 @@ class TestRenderParams:
         params = {"pattern": "{not_a_template} {run_id}"}
         assert render_params(params, "x") == {"pattern": "{not_a_template} x"}
 
+    def test_substitutes_env_tokens(self) -> None:
+        params = {"name_contains": "{env:BEHAVIORAL_FIXTURE_DEPLOYMENT_ID}"}
+        rendered = render_params(params, "r1", {"BEHAVIORAL_FIXTURE_DEPLOYMENT_ID": "dep-42"})
+        assert rendered == {"name_contains": "dep-42"}
+
+    def test_missing_env_token_raises(self) -> None:
+        params = {"name_contains": "{env:BEHAVIORAL_FIXTURE_DEPLOYMENT_ID}"}
+        with pytest.raises(ValueError, match="BEHAVIORAL_FIXTURE_DEPLOYMENT_ID"):
+            render_params(params, "r1", {})
+
 
 class TestFileExists:
     def test_pass(self, ctx: CheckContext) -> None:
         (ctx.workspace / "predictions.csv").write_text("a,b\n1,2\n")
-        result = run_checks([CheckSpec(type="file_exists", params={"path": "predictions.csv"})], ctx)
+        result = run_checks(
+            [CheckSpec(type="file_exists", params={"path": "predictions.csv"})], ctx
+        )
         assert result.outcome_pass
         assert "predictions.csv" in result.checks[0].evidence
 
@@ -97,10 +109,106 @@ class TestFileExists:
         assert result.checks[0].error is not None
 
 
+class TestFileMatches:
+    def test_pass(self, ctx: CheckContext) -> None:
+        (ctx.workspace / "report.md").write_text("# Drift\n\nfeature drift is high\n")
+        spec = CheckSpec(
+            type="file_matches", params={"path": "report.md", "pattern": "feature drift"}
+        )
+        result = run_checks([spec], ctx)
+        assert result.outcome_pass
+        assert "1 match(es)" in result.checks[0].evidence
+
+    def test_min_count(self, ctx: CheckContext) -> None:
+        (ctx.workspace / "f.txt").write_text("tenure\ncharges\n")
+        spec = CheckSpec(
+            type="file_matches",
+            params={"path": "f.txt", "pattern": "tenure|charges", "min_count": 3},
+        )
+        result = run_checks([spec], ctx)
+        assert not result.outcome_pass
+        assert "got f.txt: 2" in result.checks[0].evidence
+
+    def test_ignorecase(self, ctx: CheckContext) -> None:
+        (ctx.workspace / "f.txt").write_text("Feature Drift detected\n")
+        spec = CheckSpec(
+            type="file_matches",
+            params={"path": "f.txt", "pattern": "feature drift", "ignorecase": True},
+        )
+        assert run_checks([spec], ctx).outcome_pass
+
+    def test_glob_passes_when_any_file_matches(self, ctx: CheckContext) -> None:
+        (ctx.workspace / "a_template.csv").write_text("no signal here\n")
+        (ctx.workspace / "b_template.csv").write_text("tenure_months,charges\n0.0,1.0\n")
+        spec = CheckSpec(
+            type="file_matches", params={"path": "*template*.csv", "pattern": "tenure_months"}
+        )
+        assert run_checks([spec], ctx).outcome_pass
+
+    def test_comment_prefixed_csv_matches_raw_text(self, ctx: CheckContext) -> None:
+        # The predictions template writes a '#' metadata block before the
+        # header — regex-on-raw-text must not care.
+        (ctx.workspace / "prediction_template.csv").write_text(
+            "# Deployment: dep-1\n# Target: churn\ntenure_months,contract_type\n0.0,sample_category\n"
+        )
+        spec = CheckSpec(
+            type="file_matches",
+            params={"path": "prediction_template.csv", "pattern": "^tenure_months,"},
+        )
+        assert run_checks([spec], ctx).outcome_pass
+
+    def test_missing_file_fails(self, ctx: CheckContext) -> None:
+        spec = CheckSpec(type="file_matches", params={"path": "nope.md", "pattern": "x"})
+        result = run_checks([spec], ctx)
+        assert not result.outcome_pass
+        assert "no file matching" in result.checks[0].evidence
+
+    def test_invalid_regex_is_error(self, ctx: CheckContext) -> None:
+        (ctx.workspace / "f.txt").write_text("data")
+        spec = CheckSpec(type="file_matches", params={"path": "f.txt", "pattern": "["})
+        result = run_checks([spec], ctx)
+        assert not result.outcome_pass
+        assert "invalid regex" in (result.checks[0].error or "")
+
+    def test_missing_pattern_is_error(self, ctx: CheckContext) -> None:
+        spec = CheckSpec(type="file_matches", params={"path": "f.txt"})
+        result = run_checks([spec], ctx)
+        assert not result.outcome_pass
+        assert "pattern" in (result.checks[0].error or "")
+
+    @pytest.mark.parametrize("bad", ["/etc/passwd", "../outside.txt"])
+    def test_rejects_escaping_paths(self, ctx: CheckContext, bad: str) -> None:
+        spec = CheckSpec(type="file_matches", params={"path": bad, "pattern": "x"})
+        result = run_checks([spec], ctx)
+        assert not result.outcome_pass
+        assert result.checks[0].error is not None
+
+    def test_oversized_file_skipped(self, ctx: CheckContext) -> None:
+        (ctx.workspace / "big.txt").write_text("needle " * 10)
+        spec = CheckSpec(
+            type="file_matches", params={"path": "big.txt", "pattern": "needle", "max_bytes": 10}
+        )
+        result = run_checks([spec], ctx)
+        assert not result.outcome_pass
+        assert "max_bytes" in (result.checks[0].error or "")
+
+    def test_undecodable_bytes_never_crash(self, ctx: CheckContext) -> None:
+        (ctx.workspace / "bin.dat").write_bytes(b"\xff\xfe needle \xff")
+        spec = CheckSpec(type="file_matches", params={"path": "bin.dat", "pattern": "needle"})
+        assert run_checks([spec], ctx).outcome_pass
+
+
 class _FakeProject:
-    def __init__(self, name: str, pid: str = "proj-1") -> None:
+    def __init__(self, name: str, pid: str = "proj-1", stage: str = "modeling") -> None:
         self.project_name = name
         self.id = pid
+        self.stage = stage
+
+
+class _FakeUseCase:
+    def __init__(self, name: str, ucid: str = "uc-1") -> None:
+        self.name = name
+        self.id = ucid
 
 
 class _FakeDeployment:
@@ -114,7 +222,12 @@ class _FakeDeployment:
 class _FakeDR:
     """Duck-typed stand-in for the datarobot module."""
 
-    def __init__(self, projects: list[Any] = [], deployments: list[Any] = []) -> None:
+    def __init__(
+        self,
+        projects: list[Any] = [],
+        deployments: list[Any] = [],
+        use_cases: list[Any] = [],
+    ) -> None:
         fake = self
 
         class Project:
@@ -122,6 +235,10 @@ class _FakeDR:
             def list(search_params: dict[str, str] | None = None) -> list[Any]:
                 needle = (search_params or {}).get("project_name", "")
                 return [p for p in fake._projects if needle in p.project_name]
+
+            @staticmethod
+            def get(pid: str) -> Any:
+                return next(p for p in fake._projects if p.id == pid)
 
         class Deployment:
             @staticmethod
@@ -133,11 +250,18 @@ class _FakeDR:
             def list_by_status(statuses: list[str]) -> list[Any]:
                 return []
 
+        class UseCase:
+            @staticmethod
+            def list() -> list[Any]:
+                return list(fake._use_cases)
+
         self._projects = projects
         self._deployments = deployments
+        self._use_cases = use_cases
         self.Project = Project
         self.Deployment = Deployment
         self.BatchPredictionJob = BatchPredictionJob
+        self.UseCase = UseCase
 
 
 def _ctx_with_dr(tmp_path: Path, fake: _FakeDR) -> CheckContext:
@@ -163,17 +287,13 @@ class TestDataRobotChecks:
         assert not run_checks([spec], _ctx_with_dr(tmp_path, fake)).outcome_pass
 
     def test_deployment_healthy_pass_with_unknown_health(self, tmp_path: Path) -> None:
-        fake = _FakeDR(
-            deployments=[_FakeDeployment("drat-run-1 deploy", {"id": "m1"}, "unknown")]
-        )
+        fake = _FakeDR(deployments=[_FakeDeployment("drat-run-1 deploy", {"id": "m1"}, "unknown")])
         spec = CheckSpec(type="dr_deployment_healthy", params={"name_contains": "{run_id}"})
         result = run_checks([spec], _ctx_with_dr(tmp_path, fake))
         assert result.outcome_pass
 
     def test_deployment_failing_health_fails(self, tmp_path: Path) -> None:
-        fake = _FakeDR(
-            deployments=[_FakeDeployment("drat-run-1 deploy", {"id": "m1"}, "failing")]
-        )
+        fake = _FakeDR(deployments=[_FakeDeployment("drat-run-1 deploy", {"id": "m1"}, "failing")])
         spec = CheckSpec(type="dr_deployment_healthy", params={"name_contains": "{run_id}"})
         assert not run_checks([spec], _ctx_with_dr(tmp_path, fake)).outcome_pass
 
@@ -208,6 +328,82 @@ class TestDataRobotChecks:
             params={"path": "out.csv", "prediction_column": "score", "min_rows": 2},
         )
         assert run_checks([spec], _ctx_with_dr(tmp_path, _FakeDR())).outcome_pass
+
+
+class TestDrUseCaseExists:
+    def test_pass(self, tmp_path: Path) -> None:
+        fake = _FakeDR(use_cases=[_FakeUseCase("drat-run-1 churn use case")])
+        spec = CheckSpec(type="dr_use_case_exists", params={"name_contains": "{run_id}"})
+        result = run_checks([spec], _ctx_with_dr(tmp_path, fake))
+        assert result.outcome_pass
+        assert "uc-1" in result.checks[0].evidence
+
+    def test_fail(self, tmp_path: Path) -> None:
+        fake = _FakeDR(use_cases=[_FakeUseCase("unrelated")])
+        spec = CheckSpec(type="dr_use_case_exists", params={"name_contains": "{run_id}"})
+        assert not run_checks([spec], _ctx_with_dr(tmp_path, fake)).outcome_pass
+
+    def test_defaults_to_run_id(self, tmp_path: Path) -> None:
+        fake = _FakeDR(use_cases=[_FakeUseCase("drat-run-1")])
+        assert run_checks(
+            [CheckSpec(type="dr_use_case_exists")], _ctx_with_dr(tmp_path, fake)
+        ).outcome_pass
+
+
+class TestDrProjectStage:
+    def test_stage_pass(self, tmp_path: Path) -> None:
+        fake = _FakeDR(projects=[_FakeProject("drat-run-1 churn", stage="modeling")])
+        spec = CheckSpec(
+            type="dr_project_exists", params={"name_contains": "{run_id}", "stage": "modeling"}
+        )
+        result = run_checks([spec], _ctx_with_dr(tmp_path, fake))
+        assert result.outcome_pass
+        assert "reached stage 'modeling'" in result.checks[0].evidence
+
+    def test_wrong_stage_fails_single_shot(self, tmp_path: Path) -> None:
+        fake = _FakeDR(projects=[_FakeProject("drat-run-1 churn", stage="eda")])
+        spec = CheckSpec(
+            type="dr_project_exists", params={"name_contains": "{run_id}", "stage": "modeling"}
+        )
+        result = run_checks([spec], _ctx_with_dr(tmp_path, fake))
+        assert not result.outcome_pass
+        assert "'eda'" in result.checks[0].evidence
+
+    def test_polling_picks_up_late_stage(self, tmp_path: Path) -> None:
+        project = _FakeProject("drat-run-1 churn", stage="eda")
+        fake = _FakeDR(projects=[project])
+        lists = 0
+        orig_list = fake.Project.list
+
+        class AdvancingProject:
+            @staticmethod
+            def list(search_params: dict[str, str] | None = None) -> list[Any]:
+                nonlocal lists
+                lists += 1
+                if lists >= 2:
+                    project.stage = "modeling"
+                return orig_list(search_params)
+
+            get = fake.Project.get
+
+        fake.Project = AdvancingProject
+        spec = CheckSpec(
+            type="dr_project_exists",
+            params={
+                "name_contains": "{run_id}",
+                "stage": "modeling",
+                "deadline_seconds": 30,
+                "poll_seconds": 0,
+            },
+        )
+        result = run_checks([spec], _ctx_with_dr(tmp_path, fake))
+        assert result.outcome_pass
+        assert lists == 2
+
+    def test_no_stage_param_keeps_v1_behavior(self, tmp_path: Path) -> None:
+        fake = _FakeDR(projects=[_FakeProject("drat-run-1 churn", stage="eda")])
+        spec = CheckSpec(type="dr_project_exists", params={"name_contains": "{run_id}"})
+        assert run_checks([spec], _ctx_with_dr(tmp_path, fake)).outcome_pass
 
 
 class TestRunChecks:
@@ -255,3 +451,13 @@ class TestRunChecks:
         ctx = _ctx_with_dr(tmp_path, fake)
         run_checks([CheckSpec(type="dr_project_exists", params={"name_contains": "{run_id}"})], ctx)
         assert captured == [{"project_name": "drat-run-1"}]
+
+    def test_host_env_templated_into_params(self, tmp_path: Path) -> None:
+        fake = _FakeDR(deployments=[_FakeDeployment("fixture dep-42", {"id": "m1"}, "passing")])
+        ctx = _ctx_with_dr(tmp_path, fake)
+        spec = CheckSpec(
+            type="dr_deployment_healthy",
+            params={"name_contains": "{env:BEHAVIORAL_FIXTURE_DEPLOYMENT_ID}"},
+        )
+        result = run_checks([spec], ctx, host_env={"BEHAVIORAL_FIXTURE_DEPLOYMENT_ID": "dep-42"})
+        assert result.outcome_pass

@@ -239,7 +239,7 @@ def cmd_eval_run_behavioral(args: argparse.Namespace) -> None:
 
     evaluator = Evaluator(
         config=cfg,
-        scenarios_dir=Path(args.scenarios).resolve(),
+        scenarios_dir=[Path(p).resolve() for p in args.scenarios],
         conditions=conditions,
         n_runs=args.n_runs,
         difficulty_filter=difficulty_filter,
@@ -251,7 +251,13 @@ def cmd_eval_run_behavioral(args: argparse.Namespace) -> None:
         f"Running behavioral evaluation: driver={args.driver}, "
         f"{len(conditions)} condition(s), n_runs={args.n_runs}"
     )
-    report = evaluator.run()
+    try:
+        report = evaluator.run()
+    except ValueError as exc:
+        # Pre-run validation (missing fixture env vars, duplicate scenario
+        # ids) aborts before any agent tokens are spent.
+        print(f"❌ {exc}", file=sys.stderr)
+        sys.exit(2)
 
     output_dir = Path(args.output_dir).resolve()
     md_path, json_path = evaluator.save_report(report, output_dir)
@@ -419,7 +425,14 @@ def build_parser() -> argparse.ArgumentParser:
         "run-behavioral", help="Run skill behavioral evaluation (real agent in sandbox)"
     )
     eval_bhv_p.add_argument(
-        "--scenarios", required=True, help="Directory containing behavioral scenario YAML files"
+        "--scenarios",
+        action="append",
+        required=True,
+        help=(
+            "Directory containing behavioral scenario YAML files (repeatable; each "
+            "directory is scanned along with one subdirectory level, so "
+            "tests/behavioral/scenarios picks up every scenarios/<skill>/ dir)"
+        ),
     )
     eval_bhv_p.add_argument(
         "--skills-main", default=None, help="Skills dir (main checkout) → skill_main condition"

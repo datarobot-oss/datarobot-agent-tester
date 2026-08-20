@@ -80,10 +80,38 @@ class TestComputeOutcomeStats:
         assert stats.mean_wall_seconds == 90.0
         assert stats.skill_trigger_rate == 0.5
 
+    def test_expected_skill_trigger_rate(self) -> None:
+        results = [
+            _result(
+                ConditionType.SKILL_PR,
+                1,
+                True,
+                trajectory=TrajectoryMetrics(skill_triggered=True, skill_triggered_expected=True),
+            ),
+            # A collision run: some skill fired, but not one under test.
+            _result(
+                ConditionType.SKILL_PR,
+                2,
+                True,
+                trajectory=TrajectoryMetrics(skill_triggered=True, skill_triggered_expected=False),
+            ),
+            # Driver without trigger detection: excluded from both rates.
+            _result(
+                ConditionType.SKILL_PR,
+                3,
+                True,
+                trajectory=TrajectoryMetrics(skill_triggered=None, skill_triggered_expected=None),
+            ),
+        ]
+        stats = compute_outcome_stats(results, ConditionType.SKILL_PR)
+        assert stats.skill_trigger_rate == 1.0
+        assert stats.expected_skill_trigger_rate == 0.5
+
     def test_empty_condition(self) -> None:
         stats = compute_outcome_stats([], ConditionType.NO_SKILL)
         assert stats.n_results == 0
         assert stats.pass_rate == 0.0
+        assert stats.expected_skill_trigger_rate == 0.0
 
     def test_plan_results_excluded(self) -> None:
         stats = compute_outcome_stats(

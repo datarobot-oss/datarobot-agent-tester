@@ -116,16 +116,17 @@ def _behavioral_sections(report: EvaluationReport) -> list[str]:
         lines.append("## Behavioral Outcomes\n")
         lines.append(
             "| Condition | N | Pass rate | pass@k | Turns | Tool calls | Errors "
-            "| Tokens | Wall (s) | Skill trigger |"
+            "| Tokens | Wall (s) | Skill trigger | Expected skill |"
         )
-        lines.append("|" + "---|" * 10)
+        lines.append("|" + "---|" * 11)
         for os_ in report.outcome_stats:
             lines.append(
                 f"| {os_.condition.value} | {os_.n_results} "
                 f"| {os_.pass_rate:.0%} | {os_.pass_at_k:.0%} (k={os_.k}) "
                 f"| {os_.mean_turns:.1f} | {os_.mean_tool_calls:.1f} "
                 f"| {os_.mean_errors:.1f} | {os_.mean_total_tokens:.0f} "
-                f"| {os_.mean_wall_seconds:.0f} | {os_.skill_trigger_rate:.0%} |"
+                f"| {os_.mean_wall_seconds:.0f} | {os_.skill_trigger_rate:.0%} "
+                f"| {os_.expected_skill_trigger_rate:.0%} |"
             )
         lines.append("")
 
@@ -311,6 +312,7 @@ def _trajectory_to_dict(t: TrajectoryMetrics) -> dict[str, object]:
         "num_errors": t.num_errors,
         "num_retries": t.num_retries,
         "skill_triggered": t.skill_triggered,
+        "skill_triggered_expected": t.skill_triggered_expected,
         "skills_used": list(t.skills_used),
         "skill_first_turn": t.skill_first_turn,
         "num_unknown_events": t.num_unknown_events,
@@ -330,6 +332,7 @@ def _outcome_stats_to_dict(s: OutcomeStats) -> dict[str, object]:
         "mean_total_tokens": s.mean_total_tokens,
         "mean_wall_seconds": s.mean_wall_seconds,
         "skill_trigger_rate": s.skill_trigger_rate,
+        "expected_skill_trigger_rate": s.expected_skill_trigger_rate,
     }
 
 
@@ -418,6 +421,7 @@ def _dict_to_trajectory(d: object) -> TrajectoryMetrics | None:
     if not isinstance(d, dict):
         return None
     skill_triggered = d.get("skill_triggered")
+    skill_triggered_expected = d.get("skill_triggered_expected")
     skills_used_raw = d.get("skills_used", [])
     return TrajectoryMetrics(
         wall_seconds=_opt_float(d.get("wall_seconds")),
@@ -432,6 +436,9 @@ def _dict_to_trajectory(d: object) -> TrajectoryMetrics | None:
         num_errors=_opt_int(d.get("num_errors")),
         num_retries=_opt_int(d.get("num_retries")),
         skill_triggered=bool(skill_triggered) if skill_triggered is not None else None,
+        skill_triggered_expected=(
+            bool(skill_triggered_expected) if skill_triggered_expected is not None else None
+        ),
         skills_used=[str(s) for s in skills_used_raw] if isinstance(skills_used_raw, list) else [],
         skill_first_turn=_opt_int(d.get("skill_first_turn")),
         num_unknown_events=_opt_int(d.get("num_unknown_events")) or 0,
@@ -452,6 +459,7 @@ def _dict_to_outcome_stats(d: object) -> OutcomeStats:
         mean_total_tokens=float(d.get("mean_total_tokens", 0)),
         mean_wall_seconds=float(d.get("mean_wall_seconds", 0)),
         skill_trigger_rate=float(d.get("skill_trigger_rate", 0)),
+        expected_skill_trigger_rate=float(d.get("expected_skill_trigger_rate", 0)),
     )
 
 

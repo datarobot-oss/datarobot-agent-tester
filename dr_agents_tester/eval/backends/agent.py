@@ -8,7 +8,8 @@ with a FakeDriver.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Mapping
 from datetime import timedelta
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from ..models import (
 from ..sandbox import build_agent_env, copy_fixtures, render_prompt
 from ..scenarios import load_behavioral_scenarios
 from ..skills_install import InstalledSkill, install_skills
+from ..templating import substitute_env_tokens
 from ..trajectory import EventKind, compute_metrics
 from .base import RunContext
 
@@ -50,6 +52,7 @@ class AgentBackend:
         teardown: Teardown | None = None,
         keep_resources: bool = False,
         dr_client_factory: Callable[[], object] | None = None,
+        host_env: Mapping[str, str] | None = None,
     ) -> None:
         self.config = config
         self.driver = driver
@@ -58,11 +61,40 @@ class AgentBackend:
         self._teardown = teardown
         self.keep_resources = keep_resources
         self._dr_client_factory = dr_client_factory
+        #: Source for {env:VAR} fixture-id tokens; injectable for tests.
+        self._host_env = host_env
+
+    @property
+    def host_env(self) -> Mapping[str, str]:
+        return self._host_env if self._host_env is not None else os.environ
 
     def load_scenarios(
         self, scenarios_dir: Path, difficulty_filter: Difficulty | None
     ) -> list[ScenarioBase]:
-        return list(load_behavioral_scenarios(scenarios_dir, difficulty_filter))
+        scenarios = list(load_behavioral_scenarios(scenarios_dir, difficulty_filter))
+        self._require_env(scenarios)
+        return scenarios
+
+    def _require_env(self, scenarios: list[BehavioralScenario]) -> None:
+        """Abort the whole invocation before any agent tokens are spent.
+
+        A scenario whose fixture resources are not provisioned must fail
+        loudly, never run as silent partial coverage — CI narrows coverage by
+        selecting scenario directories, not by tolerating missing variables.
+        """
+        problems = [
+            f"{s.id}: {', '.join(missing)}"
+            for s in scenarios
+            if (missing := [v for v in s.requires_env if not self.host_env.get(v)])
+        ]
+        if problems:
+            raise ValueError(
+                "Missing required environment variable(s) for behavioral scenario(s):\n  "
+                + "\n  ".join(problems)
+                + "\nThese point at pre-provisioned fixture resources. Provision them and "
+                "export the ids (see tests/behavioral/README.md in the scenarios repo), "
+                "or drop the scenario directory from --scenarios."
+            )
 
     def execute(
         self, scenario: ScenarioBase, condition: EvalCondition, ctx: RunContext
@@ -79,9 +111,14 @@ class AgentBackend:
         if condition.skills_source is not None:
             installed = self._install_skills(condition.skills_source, paths)
 
-        prompt = render_prompt(scenario, ctx.run_id)
+        prompt = render_prompt(scenario, ctx.run_id, self.host_env)
         env = build_agent_env(paths, self.config, ctx.run_id)
-        env.update({k: v.replace("{run_id}", ctx.run_id) for k, v in scenario.env.items()})
+        env.update(
+            {
+                k: substitute_env_tokens(v.replace("{run_id}", ctx.run_id), self.host_env)
+                for k, v in scenario.env.items()
+            }
+        )
 
         raw = self.driver.run(
             paths.workspace,
@@ -92,6 +129,10 @@ class AgentBackend:
 
         events = self.driver.normalize(raw)
         metrics = compute_metrics(events, raw.wall_seconds, self.driver.capabilities)
+        if metrics.skill_triggered is not None:
+            metrics.skill_triggered_expected = bool(
+                set(metrics.skills_used) & set(scenario.skills_under_test)
+            )
 
         try:
             outcome = run_checks(
@@ -103,6 +144,7 @@ class AgentBackend:
                     env=env,
                     dr_client_factory=self._dr_client_factory,
                 ),
+                host_env=self.host_env,
             )
         finally:
             if self._teardown is not None and not self.keep_resources:

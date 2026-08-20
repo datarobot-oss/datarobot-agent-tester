@@ -15,6 +15,7 @@ from typing import Any, ClassVar
 
 from ...config import Config
 from ..models import CheckResult
+from ..templating import substitute_env_tokens
 
 
 @dataclass
@@ -56,16 +57,22 @@ def param_int(params: dict[str, object], key: str, default: int) -> int:
     return int(value)
 
 
-def render_params(params: dict[str, object], run_id: str) -> dict[str, object]:
-    """Substitute the literal token ``{run_id}`` in every string value.
+def render_params(
+    params: dict[str, object],
+    run_id: str,
+    host_env: Mapping[str, str] | None = None,
+) -> dict[str, object]:
+    """Substitute ``{run_id}`` and ``{env:VAR}`` tokens in every string value.
 
     Uses ``str.replace`` rather than ``str.format`` so any other braces in
-    parameter values survive untouched.
+    parameter values survive untouched. ``{env:VAR}`` values come from the
+    *host* environment (fixture-resource ids), never the sandbox env.
     """
     rendered: dict[str, object] = {}
     for key, value in params.items():
         if isinstance(value, str):
-            rendered[key] = value.replace("{run_id}", run_id)
+            value = value.replace("{run_id}", run_id)
+            rendered[key] = substitute_env_tokens(value, host_env or {})
         else:
             rendered[key] = value
     return rendered

@@ -8,6 +8,7 @@ dependencies installed so scenario-YAML validation works offline.
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 
 from ..models import CheckResult, CheckSpec, OutcomeResult
 from .base import CheckContext, OutcomeCheck, render_params
@@ -15,8 +16,9 @@ from .datarobot import (
     DrDeploymentHealthyCheck,
     DrPredictionsReturnedCheck,
     DrProjectExistsCheck,
+    DrUseCaseExistsCheck,
 )
-from .local import FileExistsCheck
+from .local import FileExistsCheck, FileMatchesCheck
 
 __all__ = [
     "CheckContext",
@@ -47,8 +49,12 @@ def known_check_types() -> frozenset[str]:
     return frozenset(CHECK_REGISTRY)
 
 
-def build_checks(specs: list[CheckSpec], run_id: str) -> list[OutcomeCheck]:
-    """Instantiate checks from scenario specs, templating ``{run_id}`` into params."""
+def build_checks(
+    specs: list[CheckSpec],
+    run_id: str,
+    host_env: Mapping[str, str] | None = None,
+) -> list[OutcomeCheck]:
+    """Instantiate checks from specs, templating ``{run_id}``/``{env:VAR}`` into params."""
     checks: list[OutcomeCheck] = []
     for spec in specs:
         cls = CHECK_REGISTRY.get(spec.type)
@@ -57,18 +63,22 @@ def build_checks(specs: list[CheckSpec], run_id: str) -> list[OutcomeCheck]:
                 f"Unknown check type {spec.type!r}. Known types: "
                 f"{', '.join(sorted(CHECK_REGISTRY))}"
             )
-        checks.append(cls(render_params(spec.params, run_id)))
+        checks.append(cls(render_params(spec.params, run_id, host_env)))
     return checks
 
 
-def run_checks(specs: list[CheckSpec], ctx: CheckContext) -> OutcomeResult:
+def run_checks(
+    specs: list[CheckSpec],
+    ctx: CheckContext,
+    host_env: Mapping[str, str] | None = None,
+) -> OutcomeResult:
     """Run every check (even after failures) and aggregate into an OutcomeResult.
 
     A check that raises becomes a failed :class:`CheckResult` with ``error``
     set — one broken check never hides the results of the others.
     """
     results: list[CheckResult] = []
-    for check in build_checks(specs, ctx.run_id):
+    for check in build_checks(specs, ctx.run_id, host_env):
         start = time.monotonic()
         try:
             results.append(check.run(ctx))
@@ -86,6 +96,8 @@ def run_checks(specs: list[CheckSpec], ctx: CheckContext) -> OutcomeResult:
 
 
 register_check(FileExistsCheck)
+register_check(FileMatchesCheck)
 register_check(DrProjectExistsCheck)
 register_check(DrDeploymentHealthyCheck)
 register_check(DrPredictionsReturnedCheck)
+register_check(DrUseCaseExistsCheck)
