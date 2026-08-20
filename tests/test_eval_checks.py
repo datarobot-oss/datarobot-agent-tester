@@ -227,6 +227,7 @@ class _FakeDR:
         projects: list[Any] = [],
         deployments: list[Any] = [],
         use_cases: list[Any] = [],
+        rest_responses: dict[str, Any] | None = None,
     ) -> None:
         fake = self
 
@@ -255,13 +256,33 @@ class _FakeDR:
             def list() -> list[Any]:
                 return list(fake._use_cases)
 
+        class _RestResponse:
+            def __init__(self, payload: Any) -> None:
+                self._payload = payload
+
+            def json(self) -> Any:
+                return self._payload
+
+        class _RestClient:
+            def get(self, path: str) -> Any:
+                fake.rest_calls.append(path)
+                return _RestResponse(fake._rest_responses[path])
+
+        class client:
+            @staticmethod
+            def get_client() -> Any:
+                return _RestClient()
+
         self._projects = projects
         self._deployments = deployments
         self._use_cases = use_cases
+        self._rest_responses = rest_responses or {}
+        self.rest_calls: list[str] = []
         self.Project = Project
         self.Deployment = Deployment
         self.BatchPredictionJob = BatchPredictionJob
         self.UseCase = UseCase
+        self.client = client
 
 
 def _ctx_with_dr(tmp_path: Path, fake: _FakeDR) -> CheckContext:
@@ -348,6 +369,58 @@ class TestDrUseCaseExists:
         assert run_checks(
             [CheckSpec(type="dr_use_case_exists")], _ctx_with_dr(tmp_path, fake)
         ).outcome_pass
+
+
+class TestDrTracesReceived:
+    def _fake(self, count: int, ucid: str = "uc-1") -> _FakeDR:
+        payload = {
+            "count": count,
+            "data": [{"traceId": "abc123", "spansCount": 5}] if count else [],
+        }
+        return _FakeDR(
+            use_cases=[_FakeUseCase("drat-run-1 otel use case", ucid=ucid)],
+            rest_responses={f"otel/experiment_container/{ucid}/traces/": payload},
+        )
+
+    def test_pass(self, tmp_path: Path) -> None:
+        fake = self._fake(count=2)
+        spec = CheckSpec(
+            type="dr_traces_received",
+            params={"use_case_name_contains": "{run_id}", "deadline_seconds": 0},
+        )
+        result = run_checks([spec], _ctx_with_dr(tmp_path, fake))
+        assert result.outcome_pass
+        assert "traceId=abc123" in result.checks[0].evidence
+        assert fake.rest_calls == ["otel/experiment_container/uc-1/traces/"]
+
+    def test_no_traces_fails_after_deadline(self, tmp_path: Path) -> None:
+        fake = self._fake(count=0)
+        spec = CheckSpec(
+            type="dr_traces_received",
+            params={"use_case_name_contains": "{run_id}", "deadline_seconds": 0},
+        )
+        result = run_checks([spec], _ctx_with_dr(tmp_path, fake))
+        assert not result.outcome_pass
+        assert "0 trace(s)" in result.checks[0].evidence
+
+    def test_missing_use_case_fails(self, tmp_path: Path) -> None:
+        fake = _FakeDR(use_cases=[])
+        spec = CheckSpec(type="dr_traces_received", params={"deadline_seconds": 0})
+        result = run_checks([spec], _ctx_with_dr(tmp_path, fake))
+        assert not result.outcome_pass
+        assert "no use case" in result.checks[0].evidence
+
+    def test_min_traces_threshold(self, tmp_path: Path) -> None:
+        fake = self._fake(count=1)
+        spec = CheckSpec(
+            type="dr_traces_received",
+            params={
+                "use_case_name_contains": "{run_id}",
+                "min_traces": 3,
+                "deadline_seconds": 0,
+            },
+        )
+        assert not run_checks([spec], _ctx_with_dr(tmp_path, fake)).outcome_pass
 
 
 class TestDrProjectStage:

@@ -3,6 +3,10 @@
 Two entry points: per-run teardown right after a run's checks (exact run_id
 prefix), and the sweeper for leaked resources (the ``drat-`` family prefix
 plus an age threshold), wired to ``dr-agent eval sweep``.
+
+Long-lived fixture resources (the skills repo's ``provision_fixtures.py``)
+are deliberately named with the ``bfix-`` prefix, outside the ``drat-``
+family, precisely so nothing here can ever delete them.
 """
 
 from __future__ import annotations

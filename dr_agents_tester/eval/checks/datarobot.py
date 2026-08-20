@@ -134,6 +134,67 @@ class DrUseCaseExistsCheck(OutcomeCheck):
         return _timed(self, start, False, f"no use case name contains {needle!r}")
 
 
+class DrTracesReceivedCheck(OutcomeCheck):
+    """Assert OTel traces arrived under a Use Case (experiment container).
+
+    The external-agent-monitoring skill sends traces with entity id
+    ``experiment_container-<use_case_id>``; the read side is
+    ``GET otel/experiment_container/<use_case_id>/traces/``. Ingestion is
+    asynchronous (observed latency well under a minute), so the check polls
+    until the deadline.
+
+    Params:
+        use_case_name_contains: substring to find the Use Case (default
+            ``{run_id}``); the first match is queried.
+        min_traces: minimum number of traces required (default 1).
+        deadline_seconds: keep polling until this many seconds have passed
+            (default 300).
+        poll_seconds: seconds between polling attempts (default 15).
+    """
+
+    type_name = "dr_traces_received"
+
+    def run(self, ctx: CheckContext) -> CheckResult:
+        start = time.monotonic()
+        needle = str(self.params.get("use_case_name_contains", ctx.run_id))
+        min_traces = param_int(self.params, "min_traces", 1)
+        deadline_seconds = param_int(self.params, "deadline_seconds", 300)
+        poll_seconds = param_int(self.params, "poll_seconds", 15)
+        dr = _dr_module(ctx)
+
+        matches = [u for u in dr.UseCase.list() if needle in (getattr(u, "name", "") or "")]
+        if not matches:
+            return _timed(self, start, False, f"no use case name contains {needle!r}")
+        use_case = matches[0]
+
+        client = dr.client.get_client()
+        deadline = start + deadline_seconds
+        count = 0
+        while True:
+            payload = client.get(f"otel/experiment_container/{use_case.id}/traces/").json()
+            count = int(payload.get("count", 0) or 0)
+            if count >= min_traces:
+                first = (payload.get("data") or [{}])[0]
+                return _timed(
+                    self,
+                    start,
+                    True,
+                    f"{count} trace(s) under use case {use_case.id}; first "
+                    f"traceId={first.get('traceId')} spans={first.get('spansCount')}",
+                )
+            if time.monotonic() >= deadline:
+                break
+            _sleep(poll_seconds)
+
+        return _timed(
+            self,
+            start,
+            False,
+            f"{count} trace(s) under use case {use_case.id} after "
+            f"{deadline_seconds}s; need >= {min_traces}",
+        )
+
+
 class DrDeploymentHealthyCheck(OutcomeCheck):
     """Assert a deployment matching a label substring exists and is not failing.
 

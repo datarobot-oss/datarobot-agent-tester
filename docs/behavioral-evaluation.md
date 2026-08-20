@@ -83,7 +83,7 @@ uv run --extra behavioral dr-agent eval run-behavioral \
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--scenarios` | required | Directory of behavioral scenario YAMLs (`kind: behavioral`) |
+| `--scenarios` | required | Directory of behavioral scenario YAMLs (`kind: behavioral`). Repeatable; each directory is scanned along with one subdirectory level, so `tests/behavioral/scenarios` picks up every `scenarios/<skill>/` dir. Scenario ids must be unique across all directories |
 | `--skills-main` / `--skills-pr` | — | Skills dirs; each adds its condition |
 | `--skip-no-skill` | off | Drop the `no_skill` baseline (included by default) |
 | `--conditions` | all | Comma-separated subset to run (CI runs one per matrix job) |
@@ -106,6 +106,19 @@ uv run --extra behavioral dr-agent eval run-behavioral \
 
 With ≥2 conditions the report includes paired t-tests on the 0/1 pass
 indicator, matched on (scenario, run number).
+
+### Fixture-resource injection (`requires_env` / `{env:VAR}`)
+
+Scenarios that assert against pre-provisioned, long-lived DataRobot resources
+(e.g. a fixture deployment the predictions scenario reads) declare the host
+environment variables they need in `requires_env` and reference them as
+`{env:VAR}` tokens in the prompt, `env` values, and string check params.
+Guard rails are fail-loud at three layers: parse time (every reference must
+be declared, and names must match `BEHAVIORAL_*`/`DRAT_*` — never
+credentials), run start (a missing/empty variable aborts the invocation
+before any agent tokens are spent), and substitution (an unresolved token
+raises). The values come from the *host* environment and are substituted into
+text — they are not added to the sandbox env allowlist.
 
 ## Inspecting a run
 

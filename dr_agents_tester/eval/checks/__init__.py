@@ -16,6 +16,7 @@ from .datarobot import (
     DrDeploymentHealthyCheck,
     DrPredictionsReturnedCheck,
     DrProjectExistsCheck,
+    DrTracesReceivedCheck,
     DrUseCaseExistsCheck,
 )
 from .local import FileExistsCheck, FileMatchesCheck
@@ -101,3 +102,4 @@ register_check(DrProjectExistsCheck)
 register_check(DrDeploymentHealthyCheck)
 register_check(DrPredictionsReturnedCheck)
 register_check(DrUseCaseExistsCheck)
+register_check(DrTracesReceivedCheck)
