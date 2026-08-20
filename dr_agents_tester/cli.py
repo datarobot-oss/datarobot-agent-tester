@@ -9,8 +9,10 @@ dr-agent agents revise     Revise AGENTS.md from saved report
 dr-agent skills test       Evaluate a skill file (or all with --all)
 dr-agent skills improve    Improve a skill from its saved report
 
-dr-agent eval run          Run AGENTS.md evaluation framework
-dr-agent eval report       Regenerate report from saved results
+dr-agent eval run             Run AGENTS.md evaluation framework
+dr-agent eval run-behavioral  Run skill behavioral evaluation (agent in sandbox)
+dr-agent eval report          Regenerate report from saved results
+dr-agent eval sweep           Delete leaked DataRobot resources by run prefix
 """
 
 import argparse
@@ -177,6 +179,124 @@ def cmd_eval_run(args: argparse.Namespace) -> None:
     print(f"\nReport saved to:\n  {md_path}\n  {json_path}")
 
 
+def cmd_eval_run_behavioral(args: argparse.Namespace) -> None:
+    from .eval.backends import AgentBackend
+    from .eval.drivers import get_driver
+    from .eval.models import ConditionType, Difficulty, EvalCondition
+    from .eval.runner import Evaluator
+    from .eval.stats import outcome_pass_rate
+
+    cfg = _make_config(args)
+    cfg.validate()
+
+    conditions: list[EvalCondition] = []
+    if not args.skip_no_skill:
+        conditions.append(EvalCondition(condition_type=ConditionType.NO_SKILL))
+    if args.skills_main:
+        conditions.append(
+            EvalCondition(
+                condition_type=ConditionType.SKILL_MAIN,
+                skills_source=Path(args.skills_main).resolve(),
+            )
+        )
+    if args.skills_pr:
+        conditions.append(
+            EvalCondition(
+                condition_type=ConditionType.SKILL_PR,
+                skills_source=Path(args.skills_pr).resolve(),
+            )
+        )
+
+    if args.conditions:
+        wanted = {c.strip() for c in args.conditions.split(",") if c.strip()}
+        unknown = wanted - {c.condition_type.value for c in conditions}
+        if unknown:
+            print(
+                f"❌ --conditions names not in this run: {', '.join(sorted(unknown))}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        conditions = [c for c in conditions if c.condition_type.value in wanted]
+
+    if not conditions:
+        print(
+            "❌ No conditions to run. Provide --skills-main/--skills-pr or drop --skip-no-skill.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    from .eval.checks.teardown import delete_run_resources_for_config
+
+    backend = AgentBackend(
+        config=cfg,
+        driver=get_driver(args.driver),
+        work_dir=Path(args.work_dir).resolve(),
+        teardown=None if args.keep_resources else delete_run_resources_for_config,
+        keep_resources=args.keep_resources,
+    )
+
+    difficulty_filter = Difficulty(args.difficulty) if args.difficulty else None
+
+    evaluator = Evaluator(
+        config=cfg,
+        scenarios_dir=[Path(p).resolve() for p in args.scenarios],
+        conditions=conditions,
+        n_runs=args.n_runs,
+        difficulty_filter=difficulty_filter,
+        backend=backend,
+        run_prefix=args.run_prefix,
+    )
+
+    print(
+        f"Running behavioral evaluation: driver={args.driver}, "
+        f"{len(conditions)} condition(s), n_runs={args.n_runs}"
+    )
+    try:
+        report = evaluator.run()
+    except ValueError as exc:
+        # Pre-run validation (missing fixture env vars, duplicate scenario
+        # ids) aborts before any agent tokens are spent.
+        print(f"❌ {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    output_dir = Path(args.output_dir).resolve()
+    md_path, json_path = evaluator.save_report(report, output_dir)
+    print(f"\nReport saved to:\n  {md_path}\n  {json_path}")
+
+    if args.fail_under_pass_rate is not None:
+        rates = [
+            (ct.value, outcome_pass_rate(report, ct))
+            for ct in (c.condition_type for c in conditions)
+        ]
+        failing = [
+            (name, rate)
+            for name, rate in rates
+            if rate is not None and rate < args.fail_under_pass_rate
+        ]
+        if failing:
+            for name, rate in failing:
+                print(
+                    f"❌ {name}: pass rate {rate:.0%} < gate {args.fail_under_pass_rate:.0%}",
+                    file=sys.stderr,
+                )
+            sys.exit(1)
+
+
+def cmd_eval_sweep(args: argparse.Namespace) -> None:
+    from .eval.checks.teardown import sweep
+
+    cfg = _make_config(args)
+    cfg.validate()
+    report = sweep(
+        cfg,
+        prefix=args.prefix,
+        older_than_hours=args.older_than_hours,
+        dry_run=not args.execute,
+    )
+    if report.failed:
+        sys.exit(1)
+
+
 def cmd_eval_report(args: argparse.Namespace) -> None:
     import json as json_mod
 
@@ -301,12 +421,98 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_model_args(eval_run_p)
     eval_run_p.set_defaults(func=cmd_eval_run)
 
+    eval_bhv_p = eval_sub.add_parser(
+        "run-behavioral", help="Run skill behavioral evaluation (real agent in sandbox)"
+    )
+    eval_bhv_p.add_argument(
+        "--scenarios",
+        action="append",
+        required=True,
+        help=(
+            "Directory containing behavioral scenario YAML files (repeatable; each "
+            "directory is scanned along with one subdirectory level, so "
+            "tests/behavioral/scenarios picks up every scenarios/<skill>/ dir)"
+        ),
+    )
+    eval_bhv_p.add_argument(
+        "--skills-main", default=None, help="Skills dir (main checkout) → skill_main condition"
+    )
+    eval_bhv_p.add_argument(
+        "--skills-pr", default=None, help="Skills dir (PR checkout / working tree) → skill_pr"
+    )
+    eval_bhv_p.add_argument(
+        "--skip-no-skill",
+        action="store_true",
+        help="Skip the no_skill baseline condition (included by default)",
+    )
+    eval_bhv_p.add_argument(
+        "--conditions",
+        default=None,
+        help="Comma-separated subset of conditions to run (for CI matrix jobs)",
+    )
+    eval_bhv_p.add_argument(
+        "--driver", default="opencode", help="Agent driver name (default: opencode)"
+    )
+    eval_bhv_p.add_argument("--n-runs", type=int, default=3, help="Runs per cell (default: 3)")
+    eval_bhv_p.add_argument(
+        "--difficulty",
+        default=None,
+        choices=["easy", "medium", "hard", "expert"],
+        help="Only run scenarios of this difficulty",
+    )
+    eval_bhv_p.add_argument(
+        "--work-dir",
+        default=".behavioral-runs",
+        help="Directory for per-run workspaces and transcripts (default: .behavioral-runs/)",
+    )
+    eval_bhv_p.add_argument(
+        "--output-dir", default="results", help="Output directory for reports (default: results/)"
+    )
+    eval_bhv_p.add_argument(
+        "--run-prefix",
+        default=None,
+        help="Run-id prefix (CI passes e.g. drat-gh<run_id>-<attempt>; default: drat-<scenario>)",
+    )
+    eval_bhv_p.add_argument(
+        "--keep-resources",
+        action="store_true",
+        help="Skip per-run DataRobot resource teardown (for debugging)",
+    )
+    eval_bhv_p.add_argument(
+        "--fail-under-pass-rate",
+        type=float,
+        default=None,
+        help="Exit non-zero when any condition's pass rate falls below this (absent = advisory)",
+    )
+    _add_common_model_args(eval_bhv_p)
+    eval_bhv_p.set_defaults(func=cmd_eval_run_behavioral)
+
     eval_report_p = eval_sub.add_parser("report", help="Regenerate report from saved results")
     eval_report_p.add_argument("--results", required=True, help="Path to eval_results.json")
     eval_report_p.add_argument(
         "--output-dir", default="results", help="Output directory (default: results/)"
     )
     eval_report_p.set_defaults(func=cmd_eval_report)
+
+    eval_sweep_p = eval_sub.add_parser(
+        "sweep", help="Delete leaked DataRobot resources created by behavioral runs"
+    )
+    eval_sweep_p.add_argument(
+        "--prefix", default="drat-", help="Resource-name prefix to match (default: drat-)"
+    )
+    eval_sweep_p.add_argument(
+        "--older-than-hours",
+        type=float,
+        default=24.0,
+        help="Only delete resources older than this many hours (default: 24)",
+    )
+    eval_sweep_p.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually delete. Without this flag the sweep is a dry run.",
+    )
+    _add_common_model_args(eval_sweep_p)
+    eval_sweep_p.set_defaults(func=cmd_eval_sweep)
 
     return parser
 
