@@ -72,8 +72,10 @@ class AgentBackend:
     def load_scenarios(
         self, scenarios_dir: Path, difficulty_filter: Difficulty | None
     ) -> list[ScenarioBase]:
-        scenarios = list(load_behavioral_scenarios(scenarios_dir, difficulty_filter))
-        self._require_env(scenarios)
+        behavioral = load_behavioral_scenarios(scenarios_dir, difficulty_filter)
+        self._require_env(behavioral)
+        # list is invariant, so widen explicitly to the protocol's element type.
+        scenarios: list[ScenarioBase] = list(behavioral)
         return scenarios
 
     def _require_env(self, scenarios: list[BehavioralScenario]) -> None:

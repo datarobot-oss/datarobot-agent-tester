@@ -251,9 +251,9 @@ def _validate_env_tokens(scenario: BehavioralScenario, source: Path) -> None:
     for value in scenario.env.values():
         referenced |= find_env_tokens(value)
     for check in scenario.success_checks:
-        for value in check.params.values():
-            if isinstance(value, str):
-                referenced |= find_env_tokens(value)
+        for param in check.params.values():
+            if isinstance(param, str):
+                referenced |= find_env_tokens(param)
 
     declared = set(scenario.requires_env)
     undeclared = referenced - declared
