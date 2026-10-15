@@ -67,7 +67,7 @@ def _mock_score_response() -> str:
 
 
 class TestEvaluator:
-    @patch("dr_agents_tester.eval.runner.call_llm_with_usage")
+    @patch("dr_agents_tester.eval.backends.plan.call_llm_with_usage")
     def test_run_single_condition(
         self,
         mock_llm: object,
@@ -96,7 +96,7 @@ class TestEvaluator:
         assert report.n_scenarios == 1
         assert report.n_runs == 1
 
-    @patch("dr_agents_tester.eval.runner.call_llm_with_usage")
+    @patch("dr_agents_tester.eval.backends.plan.call_llm_with_usage")
     def test_run_multiple_conditions(
         self,
         mock_llm: object,
@@ -131,7 +131,7 @@ class TestEvaluator:
         assert len(report.condition_stats) == 2
         assert len(report.pairwise_comparisons) == 1
 
-    @patch("dr_agents_tester.eval.runner.call_llm_with_usage")
+    @patch("dr_agents_tester.eval.backends.plan.call_llm_with_usage")
     def test_save_report(
         self,
         mock_llm: object,
@@ -165,7 +165,7 @@ class TestEvaluator:
         data = json.loads(json_path.read_text())
         assert data["n_scenarios"] == 1
 
-    @patch("dr_agents_tester.eval.runner.call_llm_with_usage")
+    @patch("dr_agents_tester.eval.backends.plan.call_llm_with_usage")
     def test_empty_scenarios(
         self,
         mock_llm: object,
@@ -187,3 +187,63 @@ class TestEvaluator:
 
         assert len(report.results) == 0
         mock_llm.assert_not_called()  # type: ignore[union-attr]
+
+
+_BEHAVIORAL_TEMPLATE = """\
+scenarios:
+  - id: {sid}
+    kind: behavioral
+    name: Multi-dir scenario
+    difficulty: easy
+    prompt: Do it
+    skills_under_test: [datarobot-predictions]
+    success_checks: [{{type: file_exists, path: out.csv}}]
+"""
+
+
+class TestEvaluatorMultiDir:
+    def _behavioral_evaluator(
+        self, fake_config: Config, dirs: list[Path], work_dir: Path
+    ) -> Evaluator:
+        from dr_agents_tester.eval.backends import AgentBackend
+        from dr_agents_tester.eval.drivers import FakeDriver
+
+        backend = AgentBackend(
+            config=fake_config,
+            driver=FakeDriver(files_to_create={"out.csv": "data\n"}),
+            work_dir=work_dir,
+        )
+        return Evaluator(
+            config=fake_config,
+            scenarios_dir=dirs,
+            conditions=[EvalCondition(condition_type=ConditionType.NO_SKILL)],
+            n_runs=1,
+            backend=backend,
+        )
+
+    def test_scenarios_from_multiple_dirs_aggregate(
+        self, fake_config: Config, tmp_path: Path
+    ) -> None:
+        dirs = []
+        for i, name in enumerate(("journeys", "per-skill")):
+            d = tmp_path / name
+            d.mkdir()
+            (d / "s.yaml").write_text(_BEHAVIORAL_TEMPLATE.format(sid=f"scenario-{i}"))
+            dirs.append(d)
+
+        report = self._behavioral_evaluator(fake_config, dirs, tmp_path / "runs").run()
+
+        assert sorted(r.scenario_id for r in report.results) == ["scenario-0", "scenario-1"]
+        assert report.n_scenarios == 2
+
+    def test_duplicate_ids_across_dirs_rejected(self, fake_config: Config, tmp_path: Path) -> None:
+        dirs = []
+        for name in ("a", "b"):
+            d = tmp_path / name
+            d.mkdir()
+            (d / "s.yaml").write_text(_BEHAVIORAL_TEMPLATE.format(sid="same-id"))
+            dirs.append(d)
+
+        evaluator = self._behavioral_evaluator(fake_config, dirs, tmp_path / "runs")
+        with pytest.raises(ValueError, match="Duplicate scenario id"):
+            evaluator.run()

@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""Stand-in for the opencode binary in driver subprocess tests.
+
+Behavior is controlled entirely through environment variables so the driver
+under test can pass them via its normal env plumbing:
+
+    FAKE_OPENCODE_VERSION   what --version prints (default 1.17.11)
+    FAKE_OPENCODE_FIXTURE   path to a JSONL file streamed to stdout
+    FAKE_OPENCODE_SLEEP     seconds to sleep before exiting (timeout tests)
+    FAKE_OPENCODE_EXIT      exit code (default 0)
+    FAKE_OPENCODE_DUMP_ARGS file to write argv to (command-assembly tests)
+    FAKE_OPENCODE_DUMP_ENV  file to write sorted env var names to
+"""
+
+import json
+import os
+import sys
+import time
+
+
+def main() -> int:
+    if "--version" in sys.argv:
+        print(os.environ.get("FAKE_OPENCODE_VERSION", "1.17.11"))
+        return 0
+
+    dump_args = os.environ.get("FAKE_OPENCODE_DUMP_ARGS")
+    if dump_args:
+        with open(dump_args, "w") as fh:
+            json.dump({"argv": sys.argv[1:], "cwd": os.getcwd()}, fh)
+
+    dump_env = os.environ.get("FAKE_OPENCODE_DUMP_ENV")
+    if dump_env:
+        with open(dump_env, "w") as fh:
+            json.dump(sorted(os.environ), fh)
+
+    fixture = os.environ.get("FAKE_OPENCODE_FIXTURE")
+    if fixture:
+        with open(fixture) as fh:
+            sys.stdout.write(fh.read())
+        sys.stdout.flush()
+
+    sleep = float(os.environ.get("FAKE_OPENCODE_SLEEP", "0"))
+    if sleep:
+        time.sleep(sleep)
+
+    return int(os.environ.get("FAKE_OPENCODE_EXIT", "0"))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
