@@ -16,6 +16,7 @@ from dr_agents_tester.eval.models import (
     EvalCondition,
     FixtureSpec,
     Scenario,
+    TrajectoryMetrics,
 )
 from dr_agents_tester.eval.trajectory import EventKind, TrajectoryEvent
 
@@ -398,3 +399,54 @@ class TestRejectsPlanScenario:
                 EvalCondition(condition_type=ConditionType.NO_SKILL),
                 RunContext(run_number=1, run_id="r"),
             )
+
+
+class TestDeliveredScriptMetric:
+    """The SDK-conformance metric is best-effort and must never fake a clean zero."""
+
+    def test_no_python_delivered_leaves_metric_unmeasured(
+        self, scenario: BehavioralScenario, tmp_path: Path
+    ) -> None:
+        pytest.importorskip("datarobot", reason="scanner resolves calls against the SDK")
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "notes.txt").write_text("no scripts here\n")
+        metrics = TrajectoryMetrics()
+
+        AgentBackend._measure_delivered_scripts(workspace, scenario, metrics)
+
+        assert metrics.num_delivered_script_defects is None
+        assert metrics.delivered_script_defects == []
+
+    def test_delivered_defect_is_counted(
+        self, scenario: BehavioralScenario, tmp_path: Path
+    ) -> None:
+        pytest.importorskip("datarobot", reason="scanner resolves calls against the SDK")
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "run.py").write_text(
+            "import datarobot as dr\n"
+            "dr.BatchPredictionJob.score_to_file(deployment=d, intake_file_path='a')\n"
+        )
+        metrics = TrajectoryMetrics()
+
+        AgentBackend._measure_delivered_scripts(workspace, scenario, metrics)
+
+        assert metrics.num_delivered_script_defects == 1
+        assert "score_to_file" in metrics.delivered_script_defects[0]
+
+    def test_fixture_only_workspace_is_unmeasured(
+        self, scenario: BehavioralScenario, tmp_path: Path
+    ) -> None:
+        """A fixture .py is excluded, so nothing agent-authored was scanned."""
+        pytest.importorskip("datarobot", reason="scanner resolves calls against the SDK")
+        workspace = tmp_path / "ws"
+        (workspace / "data").mkdir(parents=True)
+        (workspace / "data" / "train.csv").write_text("a\n")
+        scenario.fixtures.append(FixtureSpec(source="seed.py", dest="data/seed.py"))
+        (workspace / "data" / "seed.py").write_text("import datarobot as dr\ndr.Nope()\n")
+        metrics = TrajectoryMetrics()
+
+        AgentBackend._measure_delivered_scripts(workspace, scenario, metrics)
+
+        assert metrics.num_delivered_script_defects is None

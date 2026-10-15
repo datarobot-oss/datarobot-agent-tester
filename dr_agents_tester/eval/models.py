@@ -169,6 +169,14 @@ class TrajectoryMetrics:
     skills_used: list[str] = field(default_factory=list)
     skill_first_turn: int | None = None
     num_unknown_events: int = 0
+    #: SDK-signature defects in the Python files the agent left in the
+    #: workspace — calls that do not resolve, or that the SDK would reject on
+    #: arity or keyword names. Measures the residue where an agent fixes a bad
+    #: call inline and leaves the delivered script broken. Non-gating by
+    #: design; see ``eval/sdk_conformance.py`` for what a zero does *not* mean.
+    num_delivered_script_defects: int | None = None
+    #: One ``file:line [kind] message`` line per defect above.
+    delivered_script_defects: list[str] = field(default_factory=list)
 
     def available(self) -> list[str]:
         """Names of metrics this driver actually populated."""
@@ -189,6 +197,7 @@ class TrajectoryMetrics:
                 "skill_triggered",
                 "skill_triggered_expected",
                 "skill_first_turn",
+                "num_delivered_script_defects",
             )
             if getattr(self, name) is not None
         ]

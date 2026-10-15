@@ -25,6 +25,7 @@ from ..models import (
     EvalResult,
     ScenarioBase,
     ScoreCard,
+    TrajectoryMetrics,
 )
 from ..sandbox import build_agent_env, copy_fixtures, render_prompt
 from ..scenarios import load_behavioral_scenarios
@@ -133,6 +134,7 @@ class AgentBackend:
             metrics.skill_triggered_expected = bool(
                 set(metrics.skills_used) & set(scenario.skills_under_test)
             )
+        self._measure_delivered_scripts(paths.workspace, scenario, metrics)
 
         try:
             outcome = run_checks(
@@ -169,6 +171,33 @@ class AgentBackend:
             transcript_path=str(raw.transcript_path),
             run_id=ctx.run_id,
         )
+
+    @staticmethod
+    def _measure_delivered_scripts(
+        workspace: Path, scenario: BehavioralScenario, metrics: TrajectoryMetrics
+    ) -> None:
+        """Attach the delivered-script SDK-conformance metric, best-effort.
+
+        Fixture files are excluded: the agent did not author them, so their
+        defects are not its residue. Never raises — a failure here must not
+        cost a completed run its metrics, so the metric stays ``None`` (the
+        harness convention for "not measured") rather than a misleading zero.
+        The import is deliberately inside the guard: the analyser needs the
+        ``datarobot`` SDK to resolve calls against, and the offline test path
+        runs without it.
+        """
+        try:
+            from ..sdk_conformance import scan_delivered_scripts
+
+            scan = scan_delivered_scripts(workspace, exclude=[f.dest for f in scenario.fixtures])
+        except Exception:
+            return
+        if not scan.scanned:
+            # No agent-authored Python to bind against: leave the metric as
+            # "not measured" rather than reporting a clean zero.
+            return
+        metrics.num_delivered_script_defects = scan.num_defects
+        metrics.delivered_script_defects = scan.summaries()
 
     def _write_artifacts(
         self,

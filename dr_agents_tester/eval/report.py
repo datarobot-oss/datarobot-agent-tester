@@ -140,9 +140,9 @@ def _behavioral_sections(report: EvaluationReport) -> list[str]:
         lines.append(f"### {scenario_id}\n")
         lines.append(
             "| Condition | Run | Outcome | Failed checks | Turns | Tool calls "
-            "| Errors | Tokens | Wall (s) | Transcript |"
+            "| Errors | Script defects | Tokens | Wall (s) | Transcript |"
         )
-        lines.append("|" + "---|" * 10)
+        lines.append("|" + "---|" * 11)
         for r in sorted(by_scenario[scenario_id], key=lambda x: (x.condition.value, x.run_number)):
             assert r.outcome is not None
             verdict = "PASS" if r.outcome.outcome_pass else "FAIL"
@@ -155,10 +155,17 @@ def _behavioral_sections(report: EvaluationReport) -> list[str]:
                 or "—"
             )
             t = r.trajectory or TrajectoryMetrics()
+            # Non-gating: name the offending call sites so a defect is actionable
+            # from the report without opening the workspace.
+            defects = (
+                "; ".join(t.delivered_script_defects)
+                if t.delivered_script_defects
+                else _fmt_opt(t.num_delivered_script_defects)
+            )
             lines.append(
                 f"| {r.condition.value} | {r.run_number} | {verdict} "
                 f"| {failed} | {_fmt_opt(t.num_turns)} | {_fmt_opt(t.num_tool_calls)} "
-                f"| {_fmt_opt(t.num_errors)} | {_fmt_opt(t.total_tokens)} "
+                f"| {_fmt_opt(t.num_errors)} | {defects} | {_fmt_opt(t.total_tokens)} "
                 f"| {_fmt_opt(t.wall_seconds, '.0f')} | {r.transcript_path or '—'} |"
             )
         lines.append("")
@@ -316,6 +323,8 @@ def _trajectory_to_dict(t: TrajectoryMetrics) -> dict[str, object]:
         "skills_used": list(t.skills_used),
         "skill_first_turn": t.skill_first_turn,
         "num_unknown_events": t.num_unknown_events,
+        "num_delivered_script_defects": t.num_delivered_script_defects,
+        "delivered_script_defects": list(t.delivered_script_defects),
     }
 
 
@@ -423,6 +432,7 @@ def _dict_to_trajectory(d: object) -> TrajectoryMetrics | None:
     skill_triggered = d.get("skill_triggered")
     skill_triggered_expected = d.get("skill_triggered_expected")
     skills_used_raw = d.get("skills_used", [])
+    defects_raw = d.get("delivered_script_defects", [])
     return TrajectoryMetrics(
         wall_seconds=_opt_float(d.get("wall_seconds")),
         total_tokens=_opt_int(d.get("total_tokens")),
@@ -442,6 +452,10 @@ def _dict_to_trajectory(d: object) -> TrajectoryMetrics | None:
         skills_used=[str(s) for s in skills_used_raw] if isinstance(skills_used_raw, list) else [],
         skill_first_turn=_opt_int(d.get("skill_first_turn")),
         num_unknown_events=_opt_int(d.get("num_unknown_events")) or 0,
+        num_delivered_script_defects=_opt_int(d.get("num_delivered_script_defects")),
+        delivered_script_defects=(
+            [str(s) for s in defects_raw] if isinstance(defects_raw, list) else []
+        ),
     )
 
 
